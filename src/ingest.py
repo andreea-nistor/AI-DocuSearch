@@ -2,6 +2,8 @@ import os
 import re
 from typing import List
 
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
+
 
 def _format_pdf_page(page_number: int, text: str) -> str:
     return f"[PDF_PAGE:{page_number}]\n{text.strip()}"
@@ -115,11 +117,28 @@ def extract_text_from_text_file(path: str) -> str:
         return f.read()
 
 
+def extract_text_from_image(path: str) -> str:
+    """OCR a standalone image; returns "" when OCR is unavailable so vision can still describe it."""
+    try:
+        import pytesseract
+        from PIL import Image
+
+        env_tesseract = os.environ.get("TESSERACT_CMD")
+        if env_tesseract:
+            pytesseract.pytesseract.tesseract_cmd = env_tesseract
+        with Image.open(path) as img:
+            return (pytesseract.image_to_string(img, lang=None) or "").strip()
+    except Exception:
+        return ""
+
+
 def extract_text(path: str) -> str:
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
 
     ext = os.path.splitext(path)[1].lower()
+    if ext in IMAGE_EXTENSIONS:
+        return extract_text_from_image(path)
     if ext == ".pdf":
         # Try normal PDF extraction first
         text = extract_text_from_pdf(path)

@@ -13,6 +13,9 @@ AI DocuSearch supports:
 - **Document metadata** — Automatic page count detection for PDFs (users can ask "How many pages?")
 - **PDF page requests** — Physical PDF page identity is preserved, so users can ask for a page or
       a range such as "read pages 12-14"
+- **Automatic picture interpretation (optional)** — with `MULTIMODAL_ENABLED=true`, each PDF page
+      or uploaded PNG/JPEG/WebP is described once by a vision model at upload time; answers drawn
+      from that page include the description, clearly labeled as AI-generated
 - **Cleaning and chunking for retrieval**
 - **Lightweight retrieval fallback** for low-memory environments
 - **Live LLM integration** with any OpenAI-compatible provider (OpenAI, xAI/Grok, Groq, etc.)
@@ -148,6 +151,17 @@ swap them for OpenAI, Groq, or another provider without changing any code.
 `use_embeddings` argument, such as the CLI. The Streamlit app explicitly attempts embeddings and
 does not use this environment variable to select its initial retrieval mode.
 
+### Optional: picture interpretation
+
+Set `MULTIMODAL_ENABLED=true` and `VISION_MODEL` (a model on `LLM_API_BASE` that accepts
+`image_url` content, e.g. `gpt-4o-mini` or `grok-2-vision`) to have every PDF page and standalone
+image upload described once by the vision model when the file is uploaded. Descriptions are stored
+with their physical page as `[PICTURE_DESCRIPTION:<id>|AI_GENERATED]` blocks, so they are retrieved
+alongside page text and disclosed in the answer. Page count, pixel size, and render resolution are
+bounded by `MEDIA_MAX_PAGES`, `MEDIA_MAX_IMAGE_PIXELS`, `VISION_RENDER_DPI`, and
+`VISION_MAX_IMAGE_EDGE`. Vision calls count toward the session budget. Poppler is required for PDF
+rendering. See `Docs/STEP_12_PICTURE_INTERPRETATION.md`.
+
 ## Run the app
 
 ```bash
@@ -195,9 +209,12 @@ This means:
 - `src/ai_query.py` — live LLM request wrapper (any OpenAI-compatible provider)
 - `src/ingest.py` — document ingestion and text extraction
 - `src/preprocess.py` — document cleaning and chunk splitting
+- `src/visual_ingest.py` — optional upload-time picture interpretation via a vision model
+- `src/visual_content.py` — `PictureDescription` contract and page-aware `AI_GENERATED` markers
 - `src/prompt_loader.py` — loads prompt templates from `prompts/`
 - `prompts/rag_prompt.txt` — prompt template for retrieval-augmented generation (used when embeddings succeed)
 - `prompts/direct_llm_prompt.txt` — prompt template for direct LLM fallback (used when retrieval unavailable)
+- `prompts/picture_description_prompt.txt` — prompt used to describe each page/image at upload time
 - `web_app.py` — Streamlit navigation entry point
 - `app_pages/home.py` — document upload, Hybrid Q&A, history, feedback, and metrics UI
 
@@ -280,6 +297,7 @@ LANGSMITH_FEEDBACK_ENABLED = "true"
 - **Scanned PDFs (including Romanian)** — OCR fallback (30-60 seconds) ✓
 - **DOCX files** — extracted with table support ✓
 - **TXT files** — raw text ✓
+- **PNG / JPEG / WebP images** — only when `MULTIMODAL_ENABLED=true`; OCR text plus a vision description ✓
 
 ## Mobile Browser Support
 

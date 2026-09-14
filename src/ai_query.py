@@ -2,7 +2,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 from uuid import uuid4
 
 # Import traceable from web_app (already initialized with LangSmith credentials)
@@ -56,15 +56,22 @@ def _get_langsmith_client() -> Optional[Any]:
 
 
 def generate_answer_with_meta(
-    prompt: str, model_name: Optional[str] = None, temperature: Optional[float] = None
+    prompt: str,
+    model_name: Optional[str] = None,
+    temperature: Optional[float] = None,
+    images: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """Same resolution/request logic as generate_answer, plus timing and token metrics.
-    
+
+    `images` holds data URLs; when present the request uses OpenAI-style content parts and
+    prefers VISION_MODEL over LLM_MODEL.
+
     Uses manual LangSmith Client tracing (create_run/update_run) instead of @traceable decorator
     to ensure outputs are properly captured. The decorator approach conflicts with manual
     tracing and causes "No outputs" in LangSmith dashboard.
     """
     start = time.perf_counter()
+    images = list(images or [])
 
     resolved_temperature = temperature
     if resolved_temperature is None:
@@ -90,6 +97,7 @@ def generate_answer_with_meta(
         base_url = "https://api.openai.com/v1"
     resolved_model = (
         model_name
+        or (os.getenv("VISION_MODEL") if images else None)
         or os.getenv("LLM_MODEL")
         or os.getenv("OPENAI_MODEL")
         or os.getenv("XAI_MODEL")
@@ -145,6 +153,7 @@ def generate_answer_with_meta(
                         "question": question_text[:300],
                         "prompt_length": len(prompt),
                         "model": resolved_model,
+                        "image_count": len(images),
                     },
                 )
                 print(f"[LANGSMITH] Run created with ID: {langsmith_run_id}", file=sys.stderr)
@@ -167,9 +176,14 @@ def generate_answer_with_meta(
         try:
             import requests
             
+            content: Any = prompt
+            if images:
+                content = [{"type": "text", "text": prompt}] + [
+                    {"type": "image_url", "image_url": {"url": url}} for url in images
+                ]
             payload = {
                 "model": resolved_model,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [{"role": "user", "content": content}],
                 "temperature": resolved_temperature,
             }
             headers = {

@@ -55,6 +55,7 @@ presented as production-ready; see the known limitations and legal documents bef
 | **Step 7** | Cloud Deployment | ⚠️ 80% | Deploys; secrets loading partially hardened; needs testing |
 | **Step 8** | Feedback Collection | ✅ Complete | Thumbs up/down ratings, detailed feedback, per-session isolation |
 | **Step 9** | Internationalization | ✅ Complete | Multilingual UI, auto language detection, document metadata |
+| **Step 12** | Picture Interpretation | ⚠️ Page-level | Opt-in (`MULTIMODAL_ENABLED`); one vision description per PDF page / image, labeled AI-generated in answers |
 | **Cost Tracking** | Budget Management | ✅ Complete | Grok pricing ($0.03/1K in, $0.10/1K out), real-time badge, warnings, blocking |
 | **GDPR Compliance** | Privacy & Legal | ✅ Complete | Consent banner, data export/deletion, footer links, legal docs |
 | **UI Chat** | Streamlit App | ✅ Complete | Hybrid mode only, chat bubbles, responsive mobile, page count |

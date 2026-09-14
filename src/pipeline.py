@@ -6,6 +6,7 @@ from .preprocess import clean_text, chunk_text
 from .embed_index import EmbedIndex
 from .ai_query import generate_answer_with_meta
 from .prompt_loader import load_prompt_with_temperature
+from .visual_content import extract_picture_descriptions
 from typing import Dict, Any
 
 PDF_PAGE_CHUNK_PATTERN = re.compile(r"^\[PDF_PAGE:(\d+)\]")
@@ -191,7 +192,9 @@ def answer_question(
         lite_mode = False
     retrieval_seconds = time.perf_counter() - retrieval_start
 
-    context = "\n\n".join(chunks[i] for i in indices if i < len(chunks))
+    selected_chunks = [chunks[i] for i in indices if i < len(chunks)]
+    picture_descriptions = extract_picture_descriptions(selected_chunks)
+    context = "\n\n".join(selected_chunks)
     if requested_pages:
         requested_label = ", ".join(str(page) for page in requested_pages)
         range_notice = ""
@@ -223,6 +226,14 @@ def answer_question(
                 f"requested, but no matching page text was extracted. Available physical PDF "
                 f"pages: {available_label}. Explain this limitation without inventing content.]"
             )
+    if picture_descriptions:
+        context = (
+            "[PICTURE_DESCRIPTION_NOTICE: This context includes automatically generated visual "
+            "interpretations. Do not present them as text printed in the document. When using "
+            "them, explicitly include a section titled 'Picture description (AI-generated)' and "
+            "identify the relevant region.]\n\n"
+            f"{context}"
+        )
     prompt, file_temperature = load_prompt_with_temperature("rag_prompt", context=context, question=question, document_info=document_info)
     meta = generate_answer_with_meta(prompt, temperature=temperature if temperature is not None else file_temperature)
 
@@ -247,6 +258,8 @@ def answer_question(
         "langsmith_run_id": meta["langsmith_run_id"],
         "temperature": meta["temperature"],
         "requested_pdf_pages": requested_pages,
+        "picture_description_used": bool(picture_descriptions),
+        "picture_descriptions": picture_descriptions,
     }
 
 

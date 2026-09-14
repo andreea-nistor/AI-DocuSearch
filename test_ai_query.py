@@ -9,6 +9,7 @@ from streamlit.testing.v1 import AppTest
 
 from src.ai_query import generate_answer_with_meta
 from src.pipeline import _requested_pdf_pages, answer_question, build_pipeline_from_text
+from src.visual_content import PictureDescription, attach_picture_descriptions
 
 
 def test_live_response_is_marked_successful() -> None:
@@ -136,6 +137,48 @@ def test_page_request_selects_all_chunks_from_exact_pdf_page() -> None:
     assert result["chunk_count"] > 1
     assert result["requested_pdf_pages"] == [12]
     embedding_index.search.assert_not_called()
+
+
+def test_answer_discloses_selected_ai_generated_picture_description() -> None:
+    document = attach_picture_descriptions(
+        "[PDF_PAGE:1]\nRevenue increased during the quarter.",
+        [
+            PictureDescription(
+                region_id="p1-chart1",
+                page_number=1,
+                description="A bar chart shows revenue rising each month.",
+            )
+        ],
+    )
+    pipeline = build_pipeline_from_text(document, use_embeddings=False)
+    successful_meta: dict[str, Any] = {
+        "answer": "Revenue increased.",
+        "elapsed_seconds": 0.1,
+        "response_status": "success",
+        "error_type": None,
+        "error_message": None,
+        "used_live_api": True,
+        "langsmith_run_id": None,
+        "prompt_tokens": 10,
+        "completion_tokens": 2,
+        "total_tokens": 12,
+        "estimated_tokens": False,
+        "temperature": 0.2,
+    }
+
+    with patch("src.pipeline.generate_answer_with_meta", return_value=successful_meta) as generate:
+        result = answer_question(pipeline, "What does page 1 say?")
+
+    prompt = generate.call_args.args[0]
+    assert "PICTURE_DESCRIPTION:p1-chart1|AI_GENERATED" in prompt
+    assert "Picture description (AI-generated)" in prompt
+    assert result["picture_description_used"] is True
+    assert result["picture_descriptions"] == [
+        {
+            "region_id": "p1-chart1",
+            "description": "A bar chart shows revenue rising each month.",
+        }
+    ]
 
 
 def test_page_request_detection_supports_ranges_and_languages() -> None:

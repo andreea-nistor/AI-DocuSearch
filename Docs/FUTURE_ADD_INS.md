@@ -1,6 +1,6 @@
 # Future Add-ins
 
-**Last Updated:** 2026-08-30
+**Last Updated:** 2026-09-02
 **Status:** Proposed features for future development
 
 ---
@@ -189,8 +189,259 @@ sources could not be retrieved.
 
 ---
 
+## Multimodal Document Intelligence
+
+### Goal
+
+Extend AI DocuSearch from text-only RAG into **multimodal RAG** that can retrieve and interpret
+text, pictures, diagrams, charts, tables, handwriting, and document layout. Add audio and video as
+a later improvement after document-image support is stable.
+
+See [Multimodal Document Intelligence Implementation Plan](MULTIMODAL_IMPLEMENTATION_PLAN.md) for
+the proposed contracts, phased work, test strategy, migration rules, and acceptance gates.
+
+The current OCR fallback renders scanned PDF pages as images but immediately converts them to
+plain text. It does not preserve the image, its position, layout, chart relationships, or other
+visual evidence for retrieval or generation. The existing Hybrid fallback should remain available
+when multimodal models or media processing cannot be used.
+
+### Recommended User Experience
+
+- Keep PDF, DOCX, and TXT support, then add standalone PNG, JPEG, and WebP uploads.
+- Let users ask a vision-capable LLM to describe pictures embedded in PDF or DOCX documents,
+  complete rendered PDF pages, and standalone image uploads.
+- Show thumbnails for retrieved pages, pictures, charts, and table regions below the answer.
+- Cite evidence by document, physical page, and region, such as `[D1:P4:R2]`.
+- Let users open a citation and highlight the exact source region used for the answer.
+- Clearly label whether an answer was based on native text, OCR, a table, or visual analysis.
+- Warn when an image is unreadable, a table is incomplete, or visual confidence is low.
+- Allow questions such as "What does this chart show?", "Compare these columns", and "Describe
+  the diagram on page 7" without requiring the user to extract the content manually.
+- Support direct questions such as "Describe this image", "Read this screenshot", and "Explain
+  how the components in this diagram are connected".
+- Preserve the current text-only fallback for low-memory deployments and unsupported providers.
+
+### Structured Document Model
+
+Do not represent every source as a plain string. Introduce a structured document model while
+keeping an adapter that can produce the existing text chunks:
+
+```python
+{
+    "document_id": "...",
+    "pages": [
+        {
+            "page_number": 1,
+            "text": "...",
+            "page_image": "session-relative-reference",
+            "regions": [
+                {
+                    "region_id": "p1-r1",
+                    "type": "paragraph|picture|chart|table|formula|handwriting",
+                    "text": "OCR text or generated description",
+                    "bounding_box": [0.10, 0.15, 0.85, 0.60],
+                    "confidence": 0.94,
+                }
+            ],
+        }
+    ],
+}
+```
+
+Media references must be scoped to the current session and removed with the temporary upload.
+History should store citations and compact metadata, not page images or extracted media by default.
+
+### Image, Diagram, and Chart Understanding
+
+1. Render PDF pages and extract embedded images while preserving page numbers and coordinates.
+2. Detect meaningful visual regions and exclude decorative elements where possible.
+3. Automatically generate searchable descriptions during ingestion for pictures, diagrams, charts,
+  signatures, stamps, and forms with a vision-capable model.
+4. Attach each generated description to chunks from the same page with an explicit
+  `AI_GENERATED` marker, source region, and model provenance.
+5. Embed both descriptions and image regions in a visual or multimodal index.
+6. When an answer comes from a page containing a meaningful picture, retrieve the relevant picture
+  description as companion evidence even when the question primarily matched page text.
+7. Retrieve visual regions together with nearby text so captions and surrounding explanations are
+   not separated from the image.
+8. Send only the most relevant page or region images to a vision-capable LLM, within configurable
+   image, context, latency, and cost limits.
+9. Require the answer to include a clearly labeled **Picture description (AI-generated)** section
+  and separate visual citation whenever a generated picture description contributes to it.
+10. Require the answer to distinguish direct visual evidence from OCR text and model inference.
+
+Charts need specialized handling beyond a generic image caption. Where practical, detect axes,
+legends, labels, units, and approximate data points, then retain both the structured extraction and
+the original chart image for verification.
+
+### Table Understanding
+
+Treat tables as structured evidence instead of flattening rows into prose:
+
+- Extract native PDF and DOCX tables into rows, columns, headers, merged cells, and page metadata.
+- Use table OCR for scanned documents and preserve cell coordinates and confidence scores.
+- Store a Markdown rendering for prompting and a structured representation for calculations.
+- Repeat or associate headers across multi-page tables and detect continuation rows.
+- Retrieve relevant rows and columns, while retaining the title, headers, units, footnotes, and
+  source page.
+- Use deterministic code for arithmetic, totals, filtering, and comparisons after retrieval rather
+  than relying on the LLM to calculate from unstructured text.
+- Show the selected table region and cells as answer evidence.
+- Flag ambiguous merged cells, missing headers, and low-confidence OCR instead of inventing values.
+
+### Suggested Architecture
+
+```text
+src/
+├── document_model.py      # Pages, regions, tables, media references, and citations
+├── visual_ingest.py       # Page rendering and embedded-image extraction
+├── layout_analysis.py     # Region, reading-order, and bounding-box detection
+├── table_extraction.py    # Native and scanned-table normalization
+├── multimodal_index.py    # Visual embeddings and cross-modal retrieval
+├── media_storage.py       # Session-scoped media lifecycle and cleanup
+├── ai_query.py            # Text and image message payloads
+└── pipeline.py            # Text, table, and visual retrieval fusion
+```
+
+Keep the current text index as one retriever. Add table and visual retrievers beside it, normalize
+their scores, and fuse their ranked results. Replacing the existing text embedding model alone
+does not create multimodal RAG because images must also survive ingestion and reach generation.
+
+### Result Contract Additions
+
+Extend the result dictionary without removing existing fields:
+
+```python
+{
+    "modalities_used": ["text", "table", "image"],
+  "picture_description_used": False,
+  "picture_descriptions": [],
+    "visual_sources": [],
+    "table_sources": [],
+    "evidence_citations": [],
+    "multimodal_retrieval_seconds": 0.0,
+    "vision_generation_seconds": 0.0,
+    "media_fallback_reason": None,
+}
+```
+
+Each source should contain a document identifier, physical page number, region identifier,
+bounding box, extraction method, and confidence where available.
+
+### Security, Privacy, and Cost Requirements
+
+- Treat extracted images, metadata, transcripts, and video frames as private document content.
+- Do not send media to an external vision provider unless the deployment configuration and privacy
+  disclosure permit it.
+- Remove temporary page images, crops, audio, frames, and derived artifacts after the session.
+- Strip unnecessary image metadata and validate file signatures, dimensions, duration, and size.
+- Protect image decoders and media tools with time, memory, pixel-count, and output limits.
+- Do not persist biometric images, signatures, faces, or voice data in history by default.
+- Record which provider received which modality without logging the private content itself.
+- Limit retrieved images per question and cache session-local derived embeddings to control cost.
+- Provide a text-only mode for privacy-sensitive or low-resource deployments.
+
+### Suggested Delivery Stages
+
+#### Stage 1: Layout-Aware PDF and Table RAG
+
+- Add the structured document model and preserve page and region coordinates.
+- Extract native and scanned tables without losing rows, columns, headers, units, or footnotes.
+- Add region-level citations and a source preview with highlighted evidence.
+- Keep generation text-only by rendering retrieved tables as compact Markdown.
+
+#### Stage 2: Image and Chart RAG
+
+- Preserve page images and meaningful image regions during ingestion.
+- Automatically generate visual descriptions during ingestion and add them to same-page chunks.
+- Retrieve relevant picture descriptions when their page supplies the answer, and label them as
+  AI-generated in the response.
+- Add a multimodal retrieval index.
+- Send retrieved images to a provider-neutral vision-capable LLM adapter.
+- Support diagrams, charts, forms, handwriting, stamps, and signatures with confidence warnings.
+
+#### Stage 3: Cross-Modal Questions and Comparisons
+
+- Accept standalone image uploads and image-plus-text questions.
+- Fuse text, table, and visual retrieval results with deduplication and reranking.
+- Compare evidence across multiple documents, pages, tables, and figures.
+- Add deterministic table calculations and structured answer exports.
+
+#### Stage 4: Audio Support
+
+- Accept common audio formats behind configurable size and duration limits.
+- Transcribe speech with timestamps, speaker labels where permitted, and language detection.
+- Chunk and retrieve transcript segments while preserving links to the original time ranges.
+- Let users play the cited audio interval from an answer.
+- Consider optional non-speech event detection only for clearly defined use cases.
+
+#### Stage 5: Video Support
+
+- Extract the audio transcript and representative keyframes instead of processing every frame.
+- Detect scene changes and associate transcript intervals with keyframes and timestamps.
+- Retrieve across speech, visible text, objects, slides, and selected scenes.
+- Let users open an answer citation at the relevant video timestamp.
+- Enforce strict duration, frame-count, resolution, storage, and processing limits.
+
+### Additional Future Capabilities
+
+- **Document comparison:** compare clauses, tables, revisions, figures, and values across uploads.
+- **Forms and key-value extraction:** recognize labels, checkboxes, handwriting, signatures, and
+  repeated form fields while preserving their positions.
+- **Formula understanding:** extract mathematical expressions with links to the original region and
+  verify calculations using deterministic tools.
+- **Evidence quality scoring:** combine OCR confidence, retrieval score, source completeness, and
+  cross-source agreement to warn about uncertain answers.
+- **Human verification workflow:** allow users to correct OCR, table cells, captions, and region
+  types, then rebuild only the affected index entries.
+- **Sensitive-data detection and redaction:** detect personal or confidential regions before media
+  is sent to an external model.
+- **Accessibility output:** generate alt text, structured table summaries, and reading-order-aware
+  document descriptions.
+- **Multilingual visual documents:** detect language per page or region and retain original text
+  alongside translations.
+- **Provider and model evaluation:** maintain a benchmark set for OCR, table extraction, visual
+  retrieval, grounding, latency, and cost before changing providers.
+
+### Testing Plan
+
+- Build a small versioned corpus containing native PDFs, scans, photographs, tables, charts,
+  diagrams, handwriting, rotated pages, multi-column layouts, and intentionally unreadable regions.
+- Test that extracted regions preserve page numbers, bounding boxes, reading order, and cleanup.
+- Measure table cell accuracy and verify arithmetic against known results.
+- Verify that visual answers cite retrieved images rather than unsupported model knowledge.
+- Test mixed text-table-image questions, missing media, provider errors, and text-only fallback.
+- Test media decompression limits, malformed files, oversized dimensions, long recordings, and
+  temporary artifact deletion.
+- Mock external vision, transcription, and media APIs in normal automated tests.
+- Add desktop and mobile tests for thumbnails, table previews, citations, and media playback.
+
+### Definition of Done
+
+- Images and tables remain first-class evidence from ingestion through retrieval and generation.
+- Every multimodal claim links to a document page, region, table cells, or media time range.
+- The UI distinguishes extracted facts, visual interpretation, and low-confidence inference.
+- Text-only behavior and existing result fields remain compatible.
+- Temporary media is deleted and history does not retain raw private media by default.
+- Resource limits and provider failures degrade gracefully without losing document-only answers.
+- Benchmarks cover retrieval quality, grounded answers, extraction accuracy, latency, and cost.
+- README, configuration examples, Privacy Policy, Terms of Service, and third-party disclosures are
+  updated before release.
+
+---
+
 ## Other Candidate Add-ins
 
-Future additions can be recorded here as they are proposed. Each should define its user value,
-data flow, security and privacy impact, configuration, tests, and delivery stages before
-implementation begins.
+Other candidates worth evaluating after multimodal foundations are available:
+
+- Multi-document workspaces with reusable collections and document-level access controls.
+- Citation-grounded report generation with DOCX, PDF, CSV, and JSON export.
+- Saved questions, reusable extraction schemas, and scheduled processing workflows.
+- Human-reviewed knowledge bases where corrected evidence can be approved and versioned.
+- Local model deployment for sensitive documents and offline environments.
+- Connectors for SharePoint, OneDrive, Google Drive, object storage, and approved enterprise data
+  sources, with incremental synchronization and deletion propagation.
+- Duplicate and document-version detection to avoid indexing stale or repeated evidence.
+
+Each candidate should define its user value, data flow, security and privacy impact,
+configuration, tests, and delivery stages before implementation begins.

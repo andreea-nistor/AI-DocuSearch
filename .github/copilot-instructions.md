@@ -31,6 +31,12 @@ The ingestion tests use a custom script rather than a test runner:
 python test_ingest.py
 ```
 
+Picture-interpretation tests (mocked vision provider, no network):
+
+```powershell
+python test_visual_ingest.py
+```
+
 Run one ingestion test by importing its function:
 
 ```powershell
@@ -70,6 +76,13 @@ python test_langsmith.py
   Language preference is cached in `st.session_state` and can be manually overridden via sidebar selector.
 - `src/embed_index.py` lazily loads `all-MiniLM-L6-v2`, prefers FAISS cosine search, falls back to
   NumPy similarity, and finally to token-overlap search when embeddings cannot be used.
+- Optional picture interpretation (`MULTIMODAL_ENABLED=true`): `src/visual_ingest.py` renders each
+  PDF page (or validates a PNG/JPEG/WebP upload), sends it once to `VISION_MODEL` via
+  `generate_answer_with_meta(..., images=[data_url])`, and returns `PictureDescription`s.
+  `src/visual_content.attach_picture_descriptions()` appends them to the matching `[PDF_PAGE:n]`
+  block as `[PICTURE_DESCRIPTION:<id>|AI_GENERATED]` so they chunk and index with page text.
+  `answer_question()` reports `picture_description_used` / `picture_descriptions` and tells the LLM
+  to label them as AI-generated. Vision failures never raise; they surface as `fallback_reason`.
 - `src/ai_query.py` calls any OpenAI-compatible `/chat/completions` endpoint and returns answer,
   timing, token usage, temperature, and explicit success/simulated/error status.
   `app_pages/home.py` and `src/pipeline.py` depend on this metadata shape.
@@ -86,7 +99,8 @@ python test_langsmith.py
   `raw_answer`, `source_chunks`, `lite_mode`, build/retrieval/generation/total timings,
   `chunk_count`, `context_chars`, token counts, `estimated_tokens`, `used_live_api`,
   `response_status`, `error_type`, `error_message`,
-  `temperature`, `requested_pdf_pages`, and (in web modes) `fallback_reason`.
+  `temperature`, `requested_pdf_pages`, `picture_description_used`, `picture_descriptions`, and
+  (in web modes) `fallback_reason`.
 - Prompt templates live in `prompts/` and use Python `str.format` placeholders. Both RAG and Direct LLM require:
   - `{context}` or `{document_text}` — document content
   - `{question}` — user question

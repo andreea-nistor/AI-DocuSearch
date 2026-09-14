@@ -13,6 +13,7 @@ from src.ingest import (
 )
 from src.pipeline import build_pipeline_from_text
 from src.preprocess import chunk_text
+from src.visual_content import PictureDescription, attach_picture_descriptions
 from src.upload_storage import (
     UPLOAD_PREFIX,
     UPLOAD_TEMP_DIR,
@@ -157,6 +158,29 @@ def test_pdf_chunking_never_crosses_page_boundaries():
     )
     assert any(chunk.startswith("[PDF_PAGE:1]") for chunk in chunks)
     assert any(chunk.startswith("[PDF_PAGE:2]") for chunk in chunks)
+
+
+def test_picture_descriptions_are_labeled_and_attached_to_their_pdf_page():
+    text = "[PDF_PAGE:1]\nIntroduction.\n\n[PDF_PAGE:2]\nQuarterly results."
+    descriptions = [
+        PictureDescription(
+            region_id="p2-r1",
+            page_number=2,
+            description="A line chart rises from 10 to 25 units.",
+        )
+    ]
+
+    enriched = attach_picture_descriptions(text, descriptions)
+    chunks = chunk_text(enriched, chunk_size=200, overlap=20)
+
+    page_one_chunks = [chunk for chunk in chunks if chunk.startswith("[PDF_PAGE:1]")]
+    page_two_chunks = [chunk for chunk in chunks if chunk.startswith("[PDF_PAGE:2]")]
+    assert all("PICTURE_DESCRIPTION" not in chunk for chunk in page_one_chunks)
+    assert any(
+        "[PICTURE_DESCRIPTION:p2-r1|AI_GENERATED]" in chunk
+        and "A line chart rises from 10 to 25 units." in chunk
+        for chunk in page_two_chunks
+    )
 
 
 def test_temporary_upload_cleanup_after_success():

@@ -99,6 +99,13 @@ from src.ai_query import generate_answer_with_meta
 from src.pipeline import build_pipeline_from_text, answer_question
 from src.upload_storage import cleanup_stale_uploads, temporary_upload
 from src.prompt_loader import load_prompt_with_temperature
+from src.visual_content import attach_picture_descriptions
+from src.visual_ingest import (
+    SUPPORTED_IMAGE_EXTENSIONS,
+    describe_document_images,
+    is_visual_source,
+    multimodal_enabled,
+)
 from src.i18n import translate, get_user_language
 from src.gdpr_compliance import show_consent_banner, show_gdpr_footer
 from src.cost_tracker import initialize_cost_tracker, get_cost_badge, should_warn, is_blocked, track_query_cost
@@ -267,6 +274,8 @@ def run_direct(document_text: str, question: str, document_info: str = "Unknown"
         "temperature": meta["temperature"],
         "fallback_reason": None,
         "requested_pdf_pages": [],
+        "picture_description_used": False,
+        "picture_descriptions": [],
     }
 
 
@@ -488,6 +497,7 @@ def log_to_history(mode: str, question: str, result: dict, document_name: str) -
             "total_tokens": result.get("total_tokens", 0),
             "temperature": result.get("temperature", 0.2),
             "langsmith_run_id": result.get("langsmith_run_id"),
+            "picture_description_used": bool(result.get("picture_description_used", False)),
         }
 
         # Create history entry with timestamp
@@ -672,6 +682,9 @@ def render_chat_history() -> None:
         </div>
         """, unsafe_allow_html=True)
 
+        if metrics.get("picture_description_used"):
+            st.caption("🖼️ This answer includes an AI-generated picture description.")
+
         # Feedback buttons for this answer
         col1, col2, col3 = st.columns([1, 1, 3])
         feedback_manager = st.session_state.get("feedback_manager")
@@ -796,7 +809,10 @@ if "chat_history" not in st.session_state:
 if "loaded_docs" not in st.session_state:
     st.session_state.loaded_docs = set()
 
-uploaded = st.file_uploader(translate("upload_prompt"), type=["pdf", "docx", "txt"])
+upload_types = ["pdf", "docx", "txt"]
+if multimodal_enabled():
+    upload_types += [ext.lstrip(".") for ext in SUPPORTED_IMAGE_EXTENSIONS]
+uploaded = st.file_uploader(translate("upload_prompt"), type=upload_types)
 
 if uploaded is not None:
     if st.session_state.get("uploaded_name") != uploaded.name:
@@ -805,9 +821,11 @@ if uploaded is not None:
         st.session_state.document_text = None
         st.session_state.rag_pipeline = None
         st.session_state.page_count = None
+        st.session_state.picture_count = 0
 
         # Extract while the temporary upload exists; the context always removes it.
         try:
+            visual_result = None
             with temporary_upload(uploaded.name, uploaded.getbuffer()) as file_path:
                 st.info(f"{translate('file_saved')}: {uploaded.name} ({uploaded.size} bytes)")
                 st.info(translate("extracting"))
@@ -819,6 +837,30 @@ if uploaded is not None:
                     if file_path.lower().endswith(".pdf")
                     else None
                 )
+                if multimodal_enabled() and is_visual_source(file_path):
+                    st.info("🖼️ Interpreting pictures with the vision model...")
+                    visual_result = describe_document_images(
+                        file_path, document_info=f"Document: {uploaded.name}"
+                    )
+
+            if visual_result is not None:
+                if visual_result.prompt_tokens or visual_result.completion_tokens:
+                    track_query_cost(visual_result.prompt_tokens, visual_result.completion_tokens)
+                if visual_result.descriptions:
+                    try:
+                        document_text = attach_picture_descriptions(
+                            document_text, visual_result.descriptions
+                        )
+                        st.session_state.picture_count = len(visual_result.descriptions)
+                    except ValueError as attach_error:
+                        print(f"[VISUAL_INGEST] attach failed: {attach_error}", file=sys.stderr)
+                if visual_result.fallback_reason:
+                    st.warning(f"🖼️ Picture interpretation was incomplete: {visual_result.fallback_reason}")
+                elif visual_result.pages_truncated:
+                    st.warning(
+                        f"🖼️ Only the first {visual_result.images_processed} pages were interpreted "
+                        "for pictures (MEDIA_MAX_PAGES)."
+                    )
 
             st.session_state.document_text = document_text
             st.session_state.extraction_seconds = extraction_seconds
@@ -841,6 +883,12 @@ if uploaded is not None:
             page_info = ""
             if page_count:
                 page_info = f", {page_count} {translate('pages')}"
+            picture_count = st.session_state.get("picture_count", 0)
+            if picture_count:
+                page_info += f", {picture_count} picture description(s)"
+
+            if not document_text.strip():
+                st.warning("No text or picture descriptions could be extracted from this file.")
 
             st.success(
                 f"{translate('extracted')} {len(document_text)} {translate('chars')} "

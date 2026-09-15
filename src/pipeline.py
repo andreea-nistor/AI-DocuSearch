@@ -19,7 +19,7 @@ PDF_PAGE_REQUEST_PATTERN = re.compile(
 MAX_REQUESTED_PDF_PAGES = 5
 MAX_PAGE_CONTEXT_CHARS = 30_000
 
-# Import traceable from langsmith (initialized by web_app with credentials)
+# Import traceable from langsmith (initialized by app_pages/home.py with credentials)
 try:
     from langsmith import traceable  # type: ignore[reportUnknownVariableType]
 except Exception:

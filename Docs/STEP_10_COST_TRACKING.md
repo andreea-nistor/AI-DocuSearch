@@ -225,7 +225,7 @@ Trial-complete message and Google Forms link appear
     ↓
 User can open the optional feedback form in a new tab
     ↓
-app.stop() — the chat input is not rendered and no more questions are allowed
+app.stop() → in code this is `st.stop()` — the chat input is not rendered and no more questions are allowed
 ```
 
 ---

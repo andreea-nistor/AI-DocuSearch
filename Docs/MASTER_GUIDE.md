@@ -56,10 +56,10 @@ presented as production-ready; see the known limitations and legal documents bef
 | **Step 8** | Feedback Collection | ✅ Complete | Thumbs up/down ratings, detailed feedback, per-session isolation |
 | **Step 9** | Internationalization | ✅ Complete | Multilingual UI, auto language detection, document metadata |
 | **Step 12** | Picture Interpretation | ⚠️ Page-level | Opt-in (`MULTIMODAL_ENABLED`); one vision description per PDF page / image, labeled AI-generated in answers |
-| **Cost Tracking** | Budget Management | ✅ Complete | Grok pricing ($0.03/1K in, $0.10/1K out), real-time badge, warnings, blocking |
+| **Cost Tracking** | Budget Management | ✅ Complete | Fixed placeholder pricing ($0.03/1K in, $0.10/1K out; not provider-specific), real-time badge, warnings, blocking |
 | **GDPR Compliance** | Privacy & Legal | ✅ Complete | Consent banner, data export/deletion, footer links, legal docs |
 | **UI Chat** | Streamlit App | ✅ Complete | Hybrid mode only, chat bubbles, responsive mobile, page count |
-| **UI Metrics** | Display | ✅ Available | Hidden by default behind the Show metrics control |
+| **UI Metrics** | Display | ✅ Available | Always-visible aggregate "📊 Session Metrics" panel in `render_chat_history()`; the per-answer `render_result()`/`render_metrics()` toggle exists in code but is not currently called |
 
 ---
 
@@ -74,7 +74,7 @@ presented as production-ready; see the known limitations and legal documents bef
 - 🌍 **Multilingual support:** Auto-detected language, translated UI (English, Romanian, French, Spanish, German)
 - 📄 **Document metadata:** Automatic page count detection for PDFs, metadata accessible to LLM
 - 🗣️ **Language-aware responses:** LLM responds in the user's question language
-- 💰 **Cost tracking & budgeting:** Real-time LLM usage monitoring with Grok pricing, visual badge, budget warnings and blocking
+- 💰 **Cost tracking & budgeting:** Real-time LLM usage monitoring with fixed placeholder pricing, visual badge, budget warnings and blocking
 - � **Semantic fallback:** Automatic Direct LLM invocation when RAG can't answer document-based questions
 - �🔐 **GDPR compliance:** Consent banner, user data export/deletion, privacy policy, terms of service, third-party service disclosure, footer links
 - 🌐 **Responsive design:** Desktop + mobile optimized
@@ -273,7 +273,7 @@ temperature per prompt; there is no runtime/UI control for it.
 AI DocuSearch is optimized for [Streamlit Cloud](https://streamlit.io/cloud) deployment with:
 
 - **System dependencies** — `packages.txt` includes Tesseract OCR and Poppler for scanned PDF support
-- **Secret management** — App reads `OPENAI_API_KEY`, `LANGSMITH_API_KEY` from Streamlit secrets (not `.env`)
+- **Secret management** — App reads `LLM_API_KEY` (or the legacy `OPENAI_API_KEY`/`XAI_API_KEY`/`GROK_API_KEY` fallbacks), `LANGSMITH_API_KEY` from Streamlit secrets (not `.env`)
 - **Mobile optimization** — Responsive UI detects device type and adjusts layout automatically
 - **Language support** — OCR works with Romanian, English, and other Tesseract-supported languages
 - **Fast deployment** — Push to GitHub; app redeploys automatically

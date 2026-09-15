@@ -1,7 +1,7 @@
 # AI DocuSearch — Intelligent Document Q&A Powered by Grok
 
 **Developed by:** Andreea Nistor  
-**Last Updated:** 2026-08-30
+**Last Updated:** 2026-09-15
 
 ---
 
@@ -87,7 +87,7 @@ Perfect for:
 | **Embeddings** | all-MiniLM-L6-v2 | Lazy-loaded, ~80 MB model |
 | **Vector DB** | FAISS (CPU) | With NumPy and keyword-overlap fallbacks |
 | **LLM** | OpenAI-compatible endpoint | Grok (xAI), GPT-4, or any compatible provider |
-| **Document Processing** | PyPDF2, python-docx, pdf2image, Tesseract | Handles PDF, DOCX, TXT + OCR |
+| **Document Processing** | pypdf, python-docx, pdf2image, Tesseract | Handles PDF, DOCX, TXT + OCR; optional picture interpretation |
 | **Deployment** | Streamlit Cloud | Auto-deploys from GitHub |
 
 ---
@@ -477,7 +477,7 @@ LLM_MODEL=...
 
 ## 📄 License
 
-[Specify your license here — MIT, Apache 2.0, GPL, etc.]
+MIT License — see `LICENSE` in the repository root.
 
 ---
 
@@ -486,9 +486,9 @@ LLM_MODEL=...
 - Streamlit team for the fantastic UI framework
 - LangSmith for observability platform
 - xAI Grok for fast LLM inference
-- Open-source community (PyPDF2, python-docx, FAISS, etc.)
+- Open-source community (`pypdf`, `python-docx`, FAISS, etc.)
 
 ---
 
-**Last Updated:** 2026-08-20  
+**Last Updated:** 2026-09-15
 **Status:** Experimental project for local evaluation and controlled testing; not production-ready

@@ -1,9 +1,11 @@
 """
-Cost tracking module for LLM usage with Grok pricing.
+Cost tracking module for LLM usage.
 
-Tracks cumulative LLM costs per session and enforces $0.50 USD budget limit.
+Tracks cumulative LLM costs per session and enforces a $0.50 USD budget limit using fixed
+pricing assumptions. These rates are not read from the configured LLM_MODEL/provider; they are a
+placeholder estimate (see TERMS_OF_SERVICE.md) until per-provider pricing is implemented.
 
-Pricing (Grok):
+Assumed pricing:
 - Input: $0.03 per 1K tokens
 - Output: $0.10 per 1K tokens
 - Budget: $0.50 per session (free tier)
@@ -13,9 +15,9 @@ import streamlit as st
 from typing import Dict, Tuple
 from datetime import datetime
 
-# Grok pricing constants (in USD)
-GROK_INPUT_COST_PER_1K = 0.03  # $0.03 per 1K input tokens
-GROK_OUTPUT_COST_PER_1K = 0.10  # $0.10 per 1K output tokens
+# Fixed pricing assumptions (USD); not tied to the actually configured provider/model.
+ASSUMED_INPUT_COST_PER_1K = 0.03  # $0.03 per 1K input tokens
+ASSUMED_OUTPUT_COST_PER_1K = 0.10  # $0.10 per 1K output tokens
 FREE_BUDGET_USD = 0.50  # $0.50 free budget per session
 WARNING_THRESHOLD = 0.80  # Warn at 80% of budget
 BLOCK_THRESHOLD = 1.00  # Block at 100% of budget
@@ -39,7 +41,7 @@ def initialize_cost_tracker() -> None:
 
 def calculate_query_cost(prompt_tokens: int, completion_tokens: int) -> float:
     """
-    Calculate cost for a single query using Grok pricing.
+    Calculate cost for a single query using the fixed pricing assumptions above.
     
     Args:
         prompt_tokens: Number of tokens in the prompt/input
@@ -48,8 +50,8 @@ def calculate_query_cost(prompt_tokens: int, completion_tokens: int) -> float:
     Returns:
         Cost in USD
     """
-    input_cost = (prompt_tokens / 1000) * GROK_INPUT_COST_PER_1K
-    output_cost = (completion_tokens / 1000) * GROK_OUTPUT_COST_PER_1K
+    input_cost = (prompt_tokens / 1000) * ASSUMED_INPUT_COST_PER_1K
+    output_cost = (completion_tokens / 1000) * ASSUMED_OUTPUT_COST_PER_1K
     return input_cost + output_cost
 
 

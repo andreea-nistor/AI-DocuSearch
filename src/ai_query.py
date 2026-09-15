@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Sequence
 from uuid import uuid4
 
-# Import traceable from web_app (already initialized with LangSmith credentials)
+# Import traceable from app_pages/home.py (already initialized with LangSmith credentials)
 # This ensures all modules use the same traceable instance
 try:
     # At runtime, web_app will export traceable to sys.modules

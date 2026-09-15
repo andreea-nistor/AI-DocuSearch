@@ -5,7 +5,6 @@ and provides translation utilities.
 """
 
 import os
-import json
 from typing import Optional, Dict
 import streamlit as st
 
@@ -198,7 +197,6 @@ def detect_language_from_header() -> Optional[str]:
             print(f"[i18n] Header method 1 failed: {type(e).__name__}", flush=True)
         
         # Method 2: Try environment variable (set by some cloud providers)
-        import os
         env_lang = os.getenv("HTTP_ACCEPT_LANGUAGE", "")
         if env_lang:
             print(f"[i18n] Found HTTP_ACCEPT_LANGUAGE env: {env_lang}", flush=True)
@@ -224,7 +222,6 @@ def detect_language_from_ip() -> Optional[str]:
     for local deployments or platforms that forward X-Forwarded-For headers.
     """
     try:
-        import os
         import requests
         
         # Check if we're on Streamlit Cloud (unlikely to get user IP)

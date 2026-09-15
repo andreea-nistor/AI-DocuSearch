@@ -43,41 +43,47 @@ with GDPR, CCPA, or any other law.
 The application renders `PRIVACY_POLICY.md`, `TERMS_OF_SERVICE.md`, and
 `THIRD_PARTY_SERVICES.md` as linked in-app pages registered by `web_app.py`.
 
-**PRIVACY_POLICY.md** (8,200+ lines)
-- Comprehensive GDPR/CCPA compliance documentation
+**PRIVACY_POLICY.md** (~260 lines)
+- GDPR/CCPA-oriented privacy documentation
 - Sections:
-  1. Data collection methods
-  2. Legal basis for processing
-  3. Data retention periods
-  4. International transfers
-  5. Third-party sharing (LLM providers, LangSmith, ip-api.com)
-  6. User rights (access, deletion, portability, restriction, objection)
-  7. Security measures
-  8. Cookie policy
-  9. Children's privacy
-  10. Data breach notification
-  11. Contact information
-  12. Policy updates
-  13. Regulatory compliance (GDPR, CCPA, PIPEDA, POPIA, LGPD)
-  14. Cookies & tracking
-  15. Marketing & communications
+  1. Introduction
+  2. Project Operator and Data Controller
+  3. Information We Collect
+  4. How We Use Your Information
+  5. Data Retention & Deletion
+  6. Third-Party Data Sharing
+  7. Data Security
+  8. Your Rights Under GDPR
+  9. CCPA Rights (California Residents)
+  10. Contact
+  11. Children's Privacy
+  12. International Data Transfers
+  13. Changes to This Privacy Policy
+  14. Summary of Your Controls
+  15. Legal Basis for Processing (GDPR Article 6)
 
-**TERMS_OF_SERVICE.md** (5,500+ lines)
+**TERMS_OF_SERVICE.md** (~175 lines)
 - User agreement & AI system disclaimers
 - Sections:
-  1. Service description
-  2. User eligibility & accounts
-  3. Acceptable use policy
-  4. AI limitations & disclaimers
-  5. Limitation of liability
-  6. Indemnification
-  7. IP rights & licensing
-  8. Third-party services
-  9. Termination & suspension
-  10. Modification of terms
-  11. Dispute resolution
-  12. Governing law
-  13. Severability
+  1. Service Status and Operator
+  2. Acceptance and Eligibility
+  3. Experimental Service
+  4. Usage Limits and Cost Estimates
+  5. User Responsibilities and Prohibited Uses
+  6. Uploaded Documents and Processing Permission
+  7. File Retention
+  8. AI Limitations and Professional Advice
+  9. Third-Party Services and International Processing
+  10. History, Feedback, Export, and Deletion
+  11. Intellectual Property
+  12. Feedback
+  13. Suspension and Termination
+  14. Disclaimers
+  15. Limitation of Liability
+  16. Applicable Law and Disputes
+  17. Changes to These Terms
+  18. Severability
+  19. Contact
   14. GDPR/CCPA compliance
   15. Export controls
   16. Entire agreement
@@ -97,18 +103,22 @@ The application renders `PRIVACY_POLICY.md`, `TERMS_OF_SERVICE.md`, and
 🔒 Privacy & Data Processing Notice
 
 By using AI DocuSearch, you consent to:
-- Processing your documents with AI models
-- Storing chat history for 30 days (auto-deleted)
+- Processing your documents with AI models (text excerpts, and page images when picture
+  interpretation is enabled, are sent to the configured LLM provider)
+- Storing chat history for 30 days and feedback for 90 days (auto-deleted after)
 - Analytics & debugging via LangSmith
 - Language detection from IP/browser
 
 Your rights:
 - 📥 Download your data anytime
 - 🗑️ Delete your data anytime
-- ⏰ Auto-deletion after 30 days
+- ⏰ Auto-deletion after 30 days (history) / 90 days (feedback)
 
-[✅ I Agree & Continue] [ℹ️ More info]
+[✅ I Agree & Continue]
 ```
+
+The banner also links to the in-app Privacy Policy and Terms of Service pages; there is no
+separate "More info" button.
 
 **Implementation:**
 ```python
@@ -178,7 +188,7 @@ Your GDPR Rights:
     "feedback": [
       {
         "timestamp": "2026-08-25T10:31:00",
-        "rating": "positive",
+        "rating": true,
         "question": "What are contract dates?",
         "comment": "Accurate and concise"
       }
@@ -269,7 +279,7 @@ provider and is outside this control.
 
 | Service | Data Shared | Purpose | Privacy |
 |---------|-------------|---------|---------|
-| **Grok (xAI)** | Document text + questions | LLM processing | xAI Privacy Policy |
+| **Configured LLM provider** (OpenAI, xAI, Groq, etc.) | Document text/excerpts + questions; page images when picture interpretation is enabled | LLM processing | Provider's own privacy policy |
 | **LangSmith** | Token counts, latency, logs | Debugging & monitoring | LangSmith Privacy |
 | **ip-api.com** | IP address only | Language detection | No data storage |
 | **Streamlit Cloud** | App data | Hosting | Streamlit Privacy |
@@ -278,7 +288,7 @@ provider and is outside this control.
 Displayed in footer + Privacy Policy:
 ```
 🔗 Third-Party Services:
-- Grok LLM: Document processing
+- Configured LLM provider: Document processing
 - LangSmith: Analytics & debugging
 - ip-api.com: Geolocation-based language detection
 - Streamlit Cloud: App hosting
@@ -511,6 +521,6 @@ For privacy inquiries, data requests, or concerns:
 
 ---
 
-**Last Updated:** 2026-08-30
-**Version:** 1.1
+**Last Updated:** 2026-09-15
+**Version:** 1.2
 **Status:** Experimental privacy controls; not a legal compliance certification

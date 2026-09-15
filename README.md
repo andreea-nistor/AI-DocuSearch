@@ -207,9 +207,11 @@ physical PDF pages. Up to five pages are included per request. Physical PDF numb
 first file page and may differ from a page number printed inside a book because covers and front
 matter count as PDF pages. DOCX and TXT files do not provide stable page boundaries.
 
-The answer is displayed with a **📊 Show metrics** button underneath — click it to reveal total time, 
-build/retrieval/generation time breakdown, chunks used, context size, and token counts. Metrics stay hidden 
-until requested, keeping the default view focused on the answer.
+The answer is displayed in the chat thread. Below the conversation, `render_chat_history()` shows an
+always-visible **📊 Session Metrics** panel with total queries, total/average response time, and
+prompt/completion/total token counts for the current document's questions. A per-answer
+**Show metrics** toggle (`render_result()`/`render_metrics()` in `app_pages/home.py`) exists in code
+but is not currently wired into the live chat view.
 
 ## Example usage
 
@@ -331,7 +333,7 @@ The app is optimized for mobile browsers (Android, iOS):
 - ✅ Responsive layout (2-column metrics on mobile, 4-column on desktop)
 - ✅ Hybrid mode adapts intelligently to mobile resources (tries RAG, falls back as needed)
 - ✅ Touch-friendly buttons and text input
-- ✅ Works offline after page loads
+- ⚠️ Requires network connectivity for every LLM call; nothing is answered fully offline
 
 Test on mobile: Upload a document and ask a question — Hybrid mode handles it automatically.
 

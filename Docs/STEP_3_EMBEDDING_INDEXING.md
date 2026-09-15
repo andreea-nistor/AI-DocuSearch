@@ -7,7 +7,7 @@ The embedding and indexing step converts text chunks into semantic embeddings (n
 - Convert text chunks to numerical embeddings using a pre-trained model
 - Build a vector index for efficient similarity search
 - Enable fast retrieval of semantically relevant chunks
-- Support both FAISS (GPU-optimized) and NumPy (fallback) search backends
+- Support both FAISS (`faiss-cpu`, as pinned in `requirements.txt`) and NumPy (fallback) search backends
 
 ## Key Concepts
 

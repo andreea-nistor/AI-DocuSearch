@@ -113,8 +113,9 @@ marker-only chunk. Unmarked DOCX and TXT content follows the generic sliding-win
    - Extract chunk: `text[start:end]`
    - Add to chunks list
    - If `end == length`, stop (this is the last chunk)
-   - Otherwise move start pointer: `next_start = end - overlap`, guarding against a
-     non-advancing window by forcing `next_start = end` if `next_start <= start`
+   - Otherwise move start pointer: `start = end - overlap`. The caller-enforced invariant
+     `chunk_size > overlap` (checked in `chunk_text`) guarantees `end - overlap > previous start`,
+     so the window always advances; `_chunk_segment` itself has no separate non-advancing guard.
    - Repeat until entire text is processed
 3. Return list of chunks (wrapped in a `try`/`except MemoryError` that logs to `stderr` and re-raises)
 

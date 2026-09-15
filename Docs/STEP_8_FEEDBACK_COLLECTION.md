@@ -12,7 +12,7 @@
 - Correlate feedback with answer quality metrics (tokens, retrieval performance, mode used)
 - Support feature requests and bug reports
 - Maintain per-user privacy (session-isolated feedback, no PII)
-- Provide lightweight UI integration (non-intrusive sidebar component)
+- Provide lightweight UI integration (inline Helpful/Not helpful buttons under each answer, no separate sidebar component)
 
 ## Key Concepts
 

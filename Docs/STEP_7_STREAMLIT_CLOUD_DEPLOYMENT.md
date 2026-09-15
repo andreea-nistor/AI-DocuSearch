@@ -257,12 +257,15 @@ Edit `prompts/direct_llm_prompt.txt` or `prompts/rag_prompt.txt`:
 
 Change value to 0.1-1.0; push to GitHub.
 
-### Hide Metrics by Default
+### Session Metrics Panel
 
-Edit `app_pages/home.py` in `render_result()`:
+`render_chat_history()` in `app_pages/home.py` always displays an aggregate **📊 Session Metrics**
+panel (total queries, total/average response time, token counts) below the conversation for the
+current document; there is no toggle to show or hide it. A separate per-answer metrics toggle
+(`render_result()`/`render_metrics()`, using `show_metrics_{mode_key}` in `st.session_state`) exists
+in the module but is not currently called from the live chat flow.
 
 ```python
-show_flag = f"show_metrics_{mode_key}"
 if show_flag not in st.session_state:
     st.session_state[show_flag] = True  # Change to True to show by default
 ```

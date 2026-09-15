@@ -136,7 +136,8 @@ means keyword retrieval was used; it does not necessarily mean the environment v
 ### Step 5.2: Answer Question
 ```python
 def answer_question(
-    pipeline: Dict[str, Any], question: str, top_k: int = 3, temperature: float | None = None
+    pipeline: Dict[str, Any], question: str, top_k: int = 3, temperature: float | None = None,
+    document_info: str = "Unknown"
 ) -> Dict[str, Any]:
 ```
 
@@ -149,12 +150,12 @@ def answer_question(
     - If a requested page is unavailable, tell the model that directly instead of retrieving unrelated chunks.
     - Physical PDF numbering starts at the first file page and may differ from numbers printed in the document.
 
-2. **Check answer quality (Semantic Fallback)**
-   - After RAG returns an answer, hybrid mode checks if it's inconclusive
-   - Inconclusive patterns detected: "does not provide", "does not contain", "not found in", "cannot find", "i don't know", "unclear", "not specified", "not mentioned"
-    - If inconclusive, automatically invokes Direct LLM mode for a better answer using the full text
+2. **Semantic Fallback (implemented in `app_pages/home.py`, not in `answer_question` itself)**
+   - After RAG returns an answer, `run_hybrid()` in `app_pages/home.py` checks if it's inconclusive
+   - Inconclusive patterns detected: "does not provide", "does not contain", "not found in", "cannot find", "i don't know", "unclear", "not specified", "not mentioned" (plus Romanian, French, Spanish, and German equivalents)
+    - If inconclusive, `run_hybrid()` automatically invokes Direct LLM mode for a better answer using the full text
     - Explicit page requests do not use this fallback because their context was selected deterministically
-   - Fallback reason is tracked in result for metrics transparency
+   - Fallback reason is tracked in the web app's result for metrics transparency
 
 3. **Branch on lite mode (timed)**
    - If `pipeline["index"] is None` (lite mode), retrieval uses `_lightweight_indices` (keyword
@@ -185,10 +186,14 @@ def answer_question(
    - Return dictionary with `query`, `raw_answer`, `source_chunks`, `lite_mode`, plus metrics:
      `retrieval_seconds`, `generation_seconds`, `total_seconds`, `chunk_count`, `context_chars`,
          `prompt_tokens`, `completion_tokens`, `total_tokens`, `estimated_tokens`, `used_live_api`,
-         `response_status`, `error_type`, `error_message`, `temperature`, `requested_pdf_pages`
+         `response_status`, `error_type`, `error_message`, `temperature`, `requested_pdf_pages`,
+         `langsmith_run_id`, `picture_description_used`, `picture_descriptions`
 
 `requested_pdf_pages` is empty for normal semantic questions. DOCX and TXT inputs do not support
 deterministic page addressing because they have no stable physical PDF page boundaries.
+`picture_description_used`/`picture_descriptions` are populated only when the selected chunks carry
+`[PICTURE_DESCRIPTION:<id>|AI_GENERATED]` markers (see `STEP_12_PICTURE_INTERPRETATION.md`); they are
+`False`/`[]` otherwise.
 
 **Implementation:**
 ```python
@@ -332,11 +337,15 @@ import time
 **Dependencies:**
 - All previous steps (ingest, preprocess, embed_index, ai_query)
 - `src/prompt_loader.py` — loads `prompts/rag_prompt.txt` and resolves its `# temperature:`
-  directive for `answer_question`'s prompt (see Step 4.5 in `STEP_4_AI_QUERY.md`)
+  directive for `answer_question`'s prompt (see the Temperature section in `STEP_4_AI_QUERY.md`)
+- `src/visual_content.py` — `extract_picture_descriptions()` reads `AI_GENERATED` markers from the
+  selected chunks to populate `picture_description_used`/`picture_descriptions`
 - `langsmith` (optional) — if installed and `LANGSMITH_TRACING=true`, `build_pipeline` and
   `answer_question` are each wrapped in `@traceable(run_type="chain", ...)`, so a call to
-  `answer_question` shows up nested under `build_pipeline` (and under `generate_answer`, from
-  Step 4) as a single trace tree in the LangSmith dashboard.
+  `answer_question` shows up nested under `build_pipeline` as a single trace tree in the LangSmith
+  dashboard. `generate_answer_with_meta` (Step 4) uses manual `Client.create_run`/`update_run`
+  tracing rather than `@traceable`, so its run appears alongside, not nested under, the decorated
+  pipeline runs.
 
 ---
 

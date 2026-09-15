@@ -106,33 +106,48 @@ AI DocuSearch/
 ├── packages.txt                       # System dependencies (Streamlit Cloud)
 ├── demo.py                            # CLI demo script
 ├── web_app.py                         # Streamlit navigation entry point
+├── history_cli.py                     # CLI for browsing/exporting local history
+├── export_feedback.py                 # Feedback analytics & export tool
+├── langsmith_feedback_report.py       # Reusable feedback export and summary CLI
 ├── THIRD_PARTY_SERVICES.md            # External-provider disclosure
+├── PRIVACY_POLICY.md                  # GDPR/CCPA-oriented privacy documentation
+├── TERMS_OF_SERVICE.md                # User agreement & AI disclaimers
 ├── app_pages/
 │   ├── home.py                        # Main document Q&A application
 │   ├── privacy_policy.py              # In-app Privacy Policy
 │   ├── terms_of_service.py            # In-app Terms of Service
 │   └── third_party_services.py        # In-app provider disclosure
 ├── test_ingest.py                     # Document ingestion tests
+├── test_ai_query.py                   # Provider response-state & page-request tests
+├── test_visual_ingest.py              # Picture-interpretation tests (mocked vision provider)
+├── test_history.py                    # History tracking tests
+├── test_legal_pages.py                # Legal page navigation verification
 ├── test_langsmith.py                  # LangSmith configuration verification
+├── test_langsmith_feedback_report.py  # Feedback-report CLI tests
 ├── test_feedback.py                   # Feedback collection tests
-├── export_feedback.py                 # Feedback analytics & export tool
 ├── src/
 │   ├── ai_query.py
-│   ├── cost_tracker.py                 # Cost tracking & budget management (NEW)
+│   ├── cost_tracker.py                 # Cost tracking & budget management
 │   ├── embed_index.py
-│   ├── feedback_manager.py            # User feedback collection (NEW)
-│   ├── gdpr_compliance.py             # GDPR features: consent, data export/deletion (NEW)
+│   ├── feedback_manager.py            # User feedback collection
+│   ├── gdpr_compliance.py             # GDPR features: consent, data export/deletion
 │   ├── history_manager.py
-│   ├── i18n.py                        # Internationalization & multilingual support (NEW)
+│   ├── i18n.py                        # Internationalization & multilingual support
 │   ├── ingest.py
+│   ├── langsmith_feedback.py          # Helpful/Not helpful → LangSmith run feedback
 │   ├── pipeline.py
 │   ├── preprocess.py
-│   └── prompt_loader.py
+│   ├── prompt_loader.py
+│   ├── upload_storage.py              # Temporary upload lifecycle and cleanup
+│   ├── visual_content.py              # Picture-description markers and page attachment
+│   └── visual_ingest.py               # Optional upload-time picture interpretation (NEW)
 ├── prompts/
 │   ├── rag_prompt.txt
-│   └── direct_llm_prompt.txt
+│   ├── direct_llm_prompt.txt
+│   └── picture_description_prompt.txt      # (NEW)
 ├── Docs/
 │   ├── MASTER_GUIDE.md
+│   ├── PROJECT_OVERVIEW.md
 │   ├── STEP_1_INGEST.md
 │   ├── STEP_2_PREPROCESS.md
 │   ├── STEP_3_EMBEDDING_INDEXING.md
@@ -142,12 +157,14 @@ AI DocuSearch/
 │   ├── STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md
 │   ├── STEP_8_FEEDBACK_COLLECTION.md
 │   ├── STEP_9_INTERNATIONALIZATION.md
-│   ├── STEP_10_COST_TRACKING.md              # LLM budget management (NEW)
-│   └── STEP_11_GDPR_COMPLIANCE.md            # Privacy & legal framework (NEW)
+│   ├── STEP_10_COST_TRACKING.md            # LLM budget management
+│   ├── STEP_11_GDPR_COMPLIANCE.md          # Privacy & legal framework
+│   ├── STEP_12_PICTURE_INTERPRETATION.md   # Multimodal picture interpretation (NEW)
+│   ├── MULTIMODAL_IMPLEMENTATION_PLAN.md   # Multimodal roadmap and phased plan (NEW)
+│   ├── FUTURE_ADD_INS.md                   # Proposed future features (NEW)
+│   └── IMPLEMENTATION_IMPROVEMENTS.md
 ├── examples/
 │   └── sample.txt
-├── PRIVACY_POLICY.md                   # GDPR/CCPA compliance documentation (NEW)
-├── TERMS_OF_SERVICE.md                 # User agreement & AI disclaimers (NEW)
 └── ...
 ```
 
@@ -294,6 +311,13 @@ The `Docs/` folder contains step-by-step guides for each component:
 - **STEP_5_PIPELINE.md** — Full flow orchestration
 - **STEP_6_HISTORY_TRACKING.md** — (Optional) Session history and analytics
 - **STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md** — Deployment and configuration
+- **STEP_8_FEEDBACK_COLLECTION.md** — Helpful/Not helpful ratings and detailed feedback
+- **STEP_9_INTERNATIONALIZATION.md** — Multilingual UI and language detection
+- **STEP_10_COST_TRACKING.md** — Session budget and usage tracking
+- **STEP_11_GDPR_COMPLIANCE.md** — Consent, data export/deletion, legal pages
+- **STEP_12_PICTURE_INTERPRETATION.md** — Optional multimodal picture interpretation
+- **MULTIMODAL_IMPLEMENTATION_PLAN.md** — Phased plan for deeper multimodal RAG
+- **FUTURE_ADD_INS.md** — Proposed future features
 
 ## Design notes for GitHub publication
 
@@ -314,6 +338,8 @@ The documents in the `Docs/` folder cover the project in a modular way:
 - `STEP_3_EMBEDDING_INDEXING.md` — embeddings and search
 - `STEP_4_AI_QUERY.md` — model response generation
 - `STEP_5_PIPELINE.md` — orchestration and full workflow
+- `STEP_6_HISTORY_TRACKING.md` through `STEP_12_PICTURE_INTERPRETATION.md` — history, deployment,
+  feedback, i18n, cost tracking, GDPR compliance, and picture interpretation (see list above)
 
 ## Troubleshooting
 

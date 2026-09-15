@@ -66,14 +66,17 @@ python test_langsmith.py
 - `src/ingest.py` handles searchable PDFs with `pypdf`, then attempts OCR with
   `pdf2image`/Tesseract when no text layer exists. Both paths preserve every physical page with a
   `[PDF_PAGE:n]` marker, including empty pages. Includes `get_pdf_page_count()` to extract page metadata.
-  DOCX extraction includes paragraphs and tables; other extensions are treated as UTF-8 text except unsupported legacy `.doc`.
+  DOCX extraction includes paragraphs and tables; `.png`/`.jpg`/`.jpeg`/`.webp` route to OCR (or `""`
+  if unavailable) via `extract_text_from_image()`; other extensions are treated as UTF-8 text except
+  unsupported legacy `.doc`.
 - `src/preprocess.py` keeps marked PDF pages separate and copies the page marker into every chunk.
   `src/pipeline.py` detects explicit multilingual page requests and selects matching page chunks
   before embedding or keyword retrieval. Page ranges are limited to five physical PDF pages and
   page context to 30,000 characters.
 - `src/i18n.py` provides automatic language detection (from browser Accept-Language header or IP geolocation),
   translation of all UI strings, and language-aware LLM prompts. Supports English, Romanian, French, Spanish, German.
-  Language preference is cached in `st.session_state` and can be manually overridden via sidebar selector.
+  Language preference is cached in `st.session_state`; `set_language()` supports a manual override, but the
+  current Home page does not render the optional language-selector helper (see below).
 - `src/embed_index.py` lazily loads `all-MiniLM-L6-v2`, prefers FAISS cosine search, falls back to
   NumPy similarity, and finally to token-overlap search when embeddings cannot be used.
 - Optional picture interpretation (`MULTIMODAL_ENABLED=true`): `src/visual_ingest.py` renders each

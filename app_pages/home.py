@@ -689,7 +689,7 @@ def render_chat_history() -> None:
         """, unsafe_allow_html=True)
 
         if metrics.get("picture_description_used"):
-            st.caption("🖼️ This answer includes an AI-generated picture description.")
+            st.caption(translate("answer_includes_picture_description"))
 
         # Feedback buttons for this answer
         col1, col2, col3 = st.columns([1, 1, 3])
@@ -818,7 +818,8 @@ if "loaded_docs" not in st.session_state:
 upload_types = ["pdf", "docx", "txt"]
 if multimodal_enabled():
     upload_types += [ext.lstrip(".") for ext in SUPPORTED_IMAGE_EXTENSIONS]
-uploaded = st.file_uploader(translate("upload_prompt"), type=upload_types)
+upload_prompt_key = "upload_prompt_multimodal" if multimodal_enabled() else "upload_prompt"
+uploaded = st.file_uploader(translate(upload_prompt_key), type=upload_types)
 
 if uploaded is not None:
     if st.session_state.get("uploaded_name") != uploaded.name:
@@ -844,7 +845,7 @@ if uploaded is not None:
                     else None
                 )
                 if multimodal_enabled() and is_visual_source(file_path):
-                    st.info("🖼️ Interpreting pictures with the vision model...")
+                    st.info(translate("interpreting_pictures"))
                     visual_result = describe_document_images(
                         file_path, document_info=f"Document: {uploaded.name}"
                     )
@@ -861,11 +862,10 @@ if uploaded is not None:
                     except ValueError as attach_error:
                         print(f"[VISUAL_INGEST] attach failed: {attach_error}", file=sys.stderr)
                 if visual_result.fallback_reason:
-                    st.warning(f"🖼️ Picture interpretation was incomplete: {visual_result.fallback_reason}")
+                    st.warning(f"{translate('picture_interpretation_incomplete')}: {visual_result.fallback_reason}")
                 elif visual_result.pages_truncated:
                     st.warning(
-                        f"🖼️ Only the first {visual_result.images_processed} pages were interpreted "
-                        "for pictures (MEDIA_MAX_PAGES)."
+                        translate("picture_pages_truncated").format(count=visual_result.images_processed)
                     )
 
             st.session_state.document_text = document_text
@@ -891,10 +891,10 @@ if uploaded is not None:
                 page_info = f", {page_count} {translate('pages')}"
             picture_count = st.session_state.get("picture_count", 0)
             if picture_count:
-                page_info += f", {picture_count} picture description(s)"
+                page_info += f", {picture_count} {translate('picture_descriptions_label')}"
 
             if not document_text.strip():
-                st.warning("No text or picture descriptions could be extracted from this file.")
+                st.warning(translate("no_text_or_pictures"))
 
             st.success(
                 f"{translate('extracted')} {len(document_text)} {translate('chars')} "

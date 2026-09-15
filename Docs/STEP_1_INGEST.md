@@ -1,7 +1,7 @@
 # DocuSearch — Step 1: Document Ingestion & Text Extraction
 
 ## Overview
-The ingestion step is responsible for extracting raw text from various document formats (PDF, DOCX, and plain text files). This is the first step in the document processing pipeline that reads document files and converts them into plain text.
+The ingestion step is responsible for extracting raw text from various document formats (PDF, DOCX, plain text, and optionally standalone images). This is the first step in the document processing pipeline that reads document files and converts them into plain text.
 
 ## Purpose
 - Extract text content from multiple document formats
@@ -10,9 +10,12 @@ The ingestion step is responsible for extracting raw text from various document 
 - Enable seamless integration with downstream processing steps
 
 ## Supported File Formats
-- **PDF** (.pdf) - Using `pypdf` library
-- **Word Documents** (.docx, .doc) - Using `python-docx` library
+- **PDF** (.pdf) - Using `pypdf` library, with OCR fallback for scanned pages
+- **Word Documents** (.docx) - Using `python-docx` library. Legacy `.doc` is rejected with a clear error.
 - **Plain Text** (.txt, .md, etc.) - Using Python's built-in file reader
+- **Images** (.png, .jpg, .jpeg, .webp) - OCR text via `extract_text_from_image()`, or `""` if OCR is
+  unavailable; only meaningful once `MULTIMODAL_ENABLED=true` also generates a picture description
+  (see `STEP_12_PICTURE_INTERPRETATION.md`)
 
 ---
 
@@ -93,9 +96,10 @@ renders each page to an image and runs OCR to recover the text.
 - Raises `RuntimeError` with install instructions if `pdf2image` or `pytesseract` is missing
 - Per-page OCR failures are swallowed and treated as empty text for that page (not a hard failure)
 
-**Additional dependencies (not in `requirements.txt` by default):**
+**Additional dependencies (already pinned in `requirements.txt`):**
 - `pdf2image`, `pillow`, `pytesseract` (Python packages)
-- Poppler and Tesseract OCR system binaries must be installed separately
+- Poppler and Tesseract OCR system binaries must be installed separately (see `packages.txt` for
+  Streamlit Cloud, or set `POPPLER_PATH`/`TESSERACT_CMD` locally)
 
 **Example:**
 ```python
@@ -116,6 +120,8 @@ def extract_text(path: str) -> str:
 2. Extract file extension using `os.path.splitext()`
 3. Convert extension to lowercase for case-insensitive matching
 4. Route to appropriate extraction function based on extension:
+   - `.png`, `.jpg`, `.jpeg`, `.webp` → `extract_text_from_image()` (OCR text, or `""` if
+     `pytesseract`/Tesseract is unavailable)
      - `.pdf` → `extract_text_from_pdf()`; if that returns only page markers with no text, automatically retries
      with `extract_text_from_pdf_ocr()` (using `POPPLER_PATH` if set) before giving up
    - `.docx` → `extract_text_from_docx()`
@@ -148,12 +154,14 @@ text = extract_text("documents/notes.txt")   # Works with TXT
 - `extract_text_from_pdf_ocr(path: str, poppler_path: str | None = None) -> str`
 - `extract_text_from_docx(path: str) -> str`
 - `extract_text_from_text_file(path: str) -> str`
+- `extract_text_from_image(path: str) -> str` — OCR text for a standalone image, or `""`
+- `get_pdf_page_count(path: str) -> int`
 - `extract_text(path: str) -> str`
 
 **Dependencies:**
 - `pypdf` - PDF text extraction
 - `python-docx` - DOCX text extraction
-- `pdf2image`, `pytesseract`, `pillow` - OCR fallback (optional, plus system Poppler/Tesseract binaries)
+- `pdf2image`, `pytesseract`, `pillow` - OCR fallback and standalone image OCR (system Poppler/Tesseract binaries required)
 - `os` - File system operations
 
 ---
@@ -324,7 +332,7 @@ python -c "from src.ingest import extract_text; print(extract_text('examples/sam
 # Run the ingest module with file argument
 python src/ingest.py examples/sample.pdf
 
-# This will print the first 1000 characters of extracted text
+# This prints the full extracted text (or "No text was extracted from the file.")
 ```
 
 ### Complete Test Suite Example

@@ -14,7 +14,7 @@ decide whether a result may be displayed, counted, stored, or rated.
 |---|---|---|
 | API key | `LLM_API_KEY` | `OPENAI_API_KEY`, `XAI_API_KEY`, `GROK_API_KEY` |
 | Base URL | `LLM_API_BASE` | `OPENAI_API_BASE`, `XAI_API_BASE`, `GROK_API_BASE` |
-| Model | Function argument, then `LLM_MODEL` | `OPENAI_MODEL`, `XAI_MODEL`, `GROK_MODEL` |
+| Model | Function argument, then (when `images` is passed) `VISION_MODEL`, then `LLM_MODEL` | `OPENAI_MODEL`, `XAI_MODEL`, `GROK_MODEL` |
 
 If `OPENAI_API_KEY` is configured without a base URL, the base defaults to
 `https://api.openai.com/v1`.
@@ -57,6 +57,29 @@ payload = {
 The response is read from `choices[0].message.content`. Network errors, timeouts, non-success HTTP
 responses, malformed JSON, and incompatible response shapes are caught and represented as an
 explicit error result.
+
+### Optional images (multimodal requests)
+
+`generate_answer_with_meta(prompt, images=[data_url, ...])` accepts a list of base64 data URLs. When
+`images` is non-empty, the content becomes OpenAI-style parts and the model resolves to
+`VISION_MODEL` before `LLM_MODEL`:
+
+```python
+payload = {
+    "model": resolved_model,  # VISION_MODEL when images is non-empty
+    "messages": [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ],
+    }],
+    "temperature": resolved_temperature,
+}
+```
+
+Calls without `images` are unchanged. This is used by `src/visual_ingest.py` to describe PDF pages
+and standalone images once at upload time; see `STEP_12_PICTURE_INTERPRETATION.md`.
 
 ## Response Contract
 

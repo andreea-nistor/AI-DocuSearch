@@ -70,6 +70,11 @@ AI DocuSearch/
 ├── packages.txt                    # System dependencies for Streamlit Cloud
 ├── demo.py
 ├── web_app.py                       # Streamlit navigation entry point
+├── history_cli.py                   # CLI for browsing/exporting local history
+├── export_feedback.py               # Feedback analytics & export tool
+├── langsmith_feedback_report.py     # Reusable feedback export and summary CLI
+├── PRIVACY_POLICY.md                # GDPR/CCPA-oriented privacy documentation
+├── TERMS_OF_SERVICE.md              # User agreement & AI disclaimers
 ├── THIRD_PARTY_SERVICES.md          # External-provider disclosure
 ├── app_pages/
 │   ├── home.py                      # Main document Q&A experience
@@ -77,30 +82,51 @@ AI DocuSearch/
 │   ├── terms_of_service.py          # In-app Terms of Service page
 │   └── third_party_services.py      # In-app provider disclosure page
 ├── test_ingest.py
+├── test_ai_query.py                 # Provider response-state & page-request tests
+├── test_visual_ingest.py            # Picture-interpretation tests (mocked vision provider)
+├── test_feedback.py                 # Feedback collection tests
+├── test_history.py                  # History tracking tests
 ├── test_legal_pages.py              # Legal page navigation verification
-├── test_langsmith.py               # LangSmith configuration verification
-├── langsmith_feedback_report.py    # Reusable feedback export and summary CLI
+├── test_langsmith.py                # LangSmith configuration verification
+├── test_langsmith_feedback_report.py # Feedback-report CLI tests
 ├── src/
 │   ├── ai_query.py
+│   ├── cost_tracker.py              # Cost tracking & budget management
 │   ├── embed_index.py
-│   ├── i18n.py                     # Internationalization (multilingual support)
+│   ├── feedback_manager.py          # User feedback collection
+│   ├── gdpr_compliance.py           # Consent, data export/deletion, legal footer
+│   ├── history_manager.py
+│   ├── i18n.py                      # Internationalization (multilingual support)
 │   ├── ingest.py
+│   ├── langsmith_feedback.py        # Helpful/Not helpful → LangSmith run feedback
 │   ├── pipeline.py
 │   ├── preprocess.py
 │   ├── prompt_loader.py
-│   └── history_manager.py
+│   ├── upload_storage.py            # Temporary upload lifecycle and cleanup
+│   ├── visual_content.py            # Picture-description markers and page attachment
+│   └── visual_ingest.py             # Optional upload-time picture interpretation
 ├── prompts/
 │   ├── rag_prompt.txt
-│   └── direct_llm_prompt.txt
+│   ├── direct_llm_prompt.txt
+│   └── picture_description_prompt.txt
 ├── Docs/
 │   ├── MASTER_GUIDE.md
+│   ├── PROJECT_OVERVIEW.md
 │   ├── STEP_1_INGEST.md
 │   ├── STEP_2_PREPROCESS.md
 │   ├── STEP_3_EMBEDDING_INDEXING.md
 │   ├── STEP_4_AI_QUERY.md
 │   ├── STEP_5_PIPELINE.md
 │   ├── STEP_6_HISTORY_TRACKING.md
-│   └── STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md
+│   ├── STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md
+│   ├── STEP_8_FEEDBACK_COLLECTION.md
+│   ├── STEP_9_INTERNATIONALIZATION.md
+│   ├── STEP_10_COST_TRACKING.md
+│   ├── STEP_11_GDPR_COMPLIANCE.md
+│   ├── STEP_12_PICTURE_INTERPRETATION.md
+│   ├── MULTIMODAL_IMPLEMENTATION_PLAN.md
+│   ├── FUTURE_ADD_INS.md
+│   └── IMPLEMENTATION_IMPROVEMENTS.md
 ├── examples/
 └── ...
 ```
@@ -312,11 +338,15 @@ Test on mobile: Upload a document and ask a question — Hybrid mode handles it 
 ## Documentation
 
 The documentation set in the `Docs/` folder covers:
-- ingestion and extraction
+- ingestion and extraction, including optional picture interpretation (Step 12)
 - preprocessing and chunking
 - embedding and indexing
 - AI answer generation
 - full pipeline orchestration
+- history tracking, Streamlit Cloud deployment, feedback collection, internationalization,
+  cost tracking, and GDPR compliance (Steps 6–11)
+- the multimodal roadmap and implementation plan (`FUTURE_ADD_INS.md`,
+  `MULTIMODAL_IMPLEMENTATION_PLAN.md`)
 
 ## Git-ready status
 

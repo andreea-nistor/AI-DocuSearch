@@ -106,6 +106,12 @@ LANGSMITH_PROJECT = "ai-docusearch"
 HISTORY_ENABLED = "true"
 HISTORY_RETENTION_DAYS = "30"
 HISTORY_LIMIT = "10"
+FEEDBACK_RETENTION_DAYS = "90"
+
+# Optional: picture interpretation (Step 12, disabled by default)
+MULTIMODAL_ENABLED = "false"
+VISION_MODEL = "gpt-4o-mini"
+MEDIA_MAX_PAGES = "25"
 ```
 
 ### 3.3: Save & Rerun
@@ -156,6 +162,7 @@ Then in the deployed app, ask a question. Check your [LangSmith dashboard](https
 | Scanned PDF | Slow (30-60s) | Medium | Uses OCR; works with Romanian text |
 | DOCX | Fast ✓ | High | Includes tables |
 | TXT | Very fast ✓ | High | Plain text files |
+| PNG / JPEG / WebP | Adds one vision call | Depends on `VISION_MODEL` | Only accepted when `MULTIMODAL_ENABLED=true` |
 
 ### Device Support
 

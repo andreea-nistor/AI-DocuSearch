@@ -248,6 +248,7 @@ def run_tests():
     test_ocr_pdf_extraction_preserves_empty_page_numbers()
     test_marker_only_pdf_extraction_triggers_ocr()
     test_pdf_chunking_never_crosses_page_boundaries()
+    test_picture_descriptions_are_labeled_and_attached_to_their_pdf_page()
     test_temporary_upload_cleanup_after_success()
     test_temporary_upload_cleanup_after_failure()
     test_pipeline_remains_usable_after_upload_cleanup()

@@ -57,10 +57,10 @@ def _initialize_langsmith():
     except Exception as e:
         print(f"[INIT] Failed to load secrets: {e}", file=sys.stderr)
 
-    # ENSURE LANGSMITH_TRACING is set to "true" (must be string, not boolean)
+    # Tracing is opt-in; LangSmith reads this as a string.
     if not os.getenv("LANGSMITH_TRACING"):
-        print(f"[INIT] WARNING: LANGSMITH_TRACING not set, defaulting to 'true'", file=sys.stderr)
-        os.environ["LANGSMITH_TRACING"] = "true"
+        print(f"[INIT] LANGSMITH_TRACING not set, defaulting to 'false'", file=sys.stderr)
+        os.environ["LANGSMITH_TRACING"] = "false"
     else:
         tracing_val = os.getenv("LANGSMITH_TRACING")
         if isinstance(tracing_val, bool):
@@ -182,6 +182,12 @@ if history_enabled:
         HistoryManager.cleanup_old_sessions(retention_days=retention_days)
     except Exception:
         pass
+try:
+    FeedbackManager.cleanup_old_feedback(
+        retention_days=int(os.getenv("FEEDBACK_RETENTION_DAYS", "90"))
+    )
+except Exception:
+    pass
 
 # Check if on mobile
 is_mobile = is_mobile_browser()

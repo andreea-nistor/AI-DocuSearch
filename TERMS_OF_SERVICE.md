@@ -1,7 +1,7 @@
 # Terms of Service for AI DocuSearch
 
-**Last Updated:** August 30, 2026
-**Effective Date:** August 30, 2026
+**Last Updated:** September 15, 2026
+**Effective Date:** September 15, 2026
 
 ## 1. Service Status and Operator
 
@@ -19,7 +19,7 @@ You must be at least 18 years old, or use the Service with the authorization and
 
 ## 3. Experimental Service
 
-The Service accepts PDF, DOCX, and TXT files, extracts text, and uses AI systems to answer questions about that text. It normally attempts retrieval-augmented generation first and may fall back to sending more of the document text directly to a configured large language model provider.
+The Service accepts PDF, DOCX, and TXT files (and PNG, JPEG, or WebP images when the operator enables picture interpretation), extracts text, and uses AI systems to answer questions about that content. It normally attempts retrieval-augmented generation first and may fall back to sending more of the document text directly to a configured large language model provider. When picture interpretation is enabled, a downscaled image of each PDF page or uploaded image is also sent once to a vision-capable model, and the resulting descriptions are labeled as AI-generated in answers.
 
 The Service may be changed, restricted, suspended, reset, or discontinued at any time. Features may fail or behave differently during testing. No uptime, response-time, compatibility, or continued-availability commitment is provided.
 
@@ -57,6 +57,7 @@ You retain any rights you hold in documents and questions you submit. You grant 
 - Temporarily copy and store an uploaded file.
 - Extract, clean, divide, and search its text.
 - Send relevant excerpts, questions, prompts, and, during fallback, potentially the full extracted text to configured service providers.
+- When picture interpretation is enabled, render document pages or uploaded images and send them to a configured vision-capable model provider.
 - Generate and display answers.
 - Produce operational metrics and debugging traces described in the Privacy Policy.
 
@@ -64,7 +65,7 @@ This permission ends when the content is no longer required for these purposes, 
 
 ## 7. File Retention
 
-Uploaded files are copied to an application-specific temporary directory only for extraction and PDF page counting. The application deletes each temporary copy immediately after that processing succeeds or fails. It retains extracted text and an in-memory retrieval index for the active session instead of retaining the uploaded file. On startup, it removes application-created upload files older than one hour that may have survived an interrupted server process.
+Uploaded files are copied to an application-specific temporary directory only for extraction, PDF page counting, and, when picture interpretation is enabled, page rendering. The application deletes each temporary copy immediately after that processing succeeds or fails. It retains extracted text, any generated picture descriptions, and an in-memory retrieval index for the active session instead of retaining the uploaded file or page images. On startup, it removes application-created upload files older than one hour that may have survived an interrupted server process.
 
 The footer's "Delete Data" control removes locally stored session history, feedback, and in-memory document state. Temporary uploaded-file copies have already been removed after extraction. The control cannot guarantee deletion of data already retained by third-party providers.
 
@@ -163,7 +164,7 @@ If a provision of these Terms is found unenforceable, the remaining provisions w
 
 **Email:** lazar87andreea@gmail.com
 
-**GitHub:** https://github.com/lazar87andreea-glitch/AI-DocuSearch
+**GitHub:** https://github.com/andreea-nistor/AI-DocuSearch
 
 For privacy requests, also consult the Privacy Policy and the Privacy & Data Management controls in the Application footer.
 

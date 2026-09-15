@@ -146,28 +146,19 @@ def detect_language_from_header() -> Optional[str]:
     since IP geolocation sees Streamlit's server IP, not the user's actual location.
     """
     try:
-        # Method 1: Try to get from Streamlit Server context
+        # Method 1: Streamlit >= 1.37 exposes request headers via st.context
         try:
-            from streamlit.server.server import Server
-            server = Server.get_current()
-            if server:
-                # Try multiple attribute paths
-                headers = None
-                if hasattr(server, 'headers'):
-                    headers = server.headers
-                elif hasattr(server, '_request') and hasattr(server._request, 'headers'):
-                    headers = server._request.headers
-                
-                if headers and isinstance(headers, dict):
-                    accept_lang = headers.get('Accept-Language', '')
-                    if accept_lang:
-                        print(f"[i18n] Found Accept-Language header: {accept_lang}", flush=True)
-                        # Parse: en-US,en;q=0.9,fr;q=0.8,de;q=0.7
-                        langs = [lang.split('-')[0].lower().strip() for lang in accept_lang.split(',')]
-                        for lang in langs:
-                            if lang in TRANSLATIONS:
-                                print(f"[i18n] Matched language from header: {lang}", flush=True)
-                                return lang
+            import streamlit as st
+
+            accept_lang = st.context.headers.get("Accept-Language", "")
+            if accept_lang:
+                print(f"[i18n] Found Accept-Language header: {accept_lang}", flush=True)
+                # Parse: en-US,en;q=0.9,fr;q=0.8,de;q=0.7
+                langs = [lang.split(';')[0].split('-')[0].lower().strip() for lang in accept_lang.split(',')]
+                for lang in langs:
+                    if lang in TRANSLATIONS:
+                        print(f"[i18n] Matched language from header: {lang}", flush=True)
+                        return lang
         except Exception as e:
             print(f"[i18n] Header method 1 failed: {type(e).__name__}", flush=True)
         

@@ -1,7 +1,7 @@
 # Privacy Policy for AI DocuSearch
 
-**Last Updated:** August 30, 2026
-**Effective Date:** August 30, 2026
+**Last Updated:** September 15, 2026
+**Effective Date:** September 15, 2026
 
 ## 1. Introduction
 
@@ -26,7 +26,7 @@ The operator is an individual, not a company, and has not appointed a Data Prote
 ## 3. Information We Collect
 
 ### 3.1 Information You Provide
-- **Document Content**: Files you upload (PDF, DOCX, TXT) for text extraction and analysis
+- **Document Content**: Files you upload (PDF, DOCX, TXT, and — when the operator enables picture interpretation — PNG, JPEG, or WebP images) for text extraction and analysis
 - **Questions & Queries**: Search questions and prompts you submit
 - **Feedback**: Ratings, comments, and feedback on responses
 - **Session Information**: Conversation history and interaction data
@@ -66,7 +66,7 @@ We use collected information for:
 - **Chat History**: Deleted automatically after 30 days
 - **Feedback Data**: Stored locally until you use "Delete Data" for the current session or the service operator runs the available cleanup process
 - **Session Data**: Deleted when session ends
-- **Temporary Uploaded Files**: Uploaded files are copied to an application-specific directory on the host system only for extraction and PDF page counting. The application deletes each temporary copy immediately after that processing succeeds or fails. It keeps extracted text and an in-memory retrieval index for the active session instead of retaining the uploaded file. On startup, it also removes application-created upload files older than one hour that may have survived an interrupted server process.
+- **Temporary Uploaded Files**: Uploaded files are copied to an application-specific directory on the host system only for extraction, PDF page counting, and — when picture interpretation is enabled — rendering pages as images for the vision model. The application deletes each temporary copy immediately after that processing succeeds or fails. It keeps extracted text, generated picture descriptions, and an in-memory retrieval index for the active session instead of retaining the uploaded file or its page images. On startup, it also removes application-created upload files older than one hour that may have survived an interrupted server process.
 
 ### 5.2 User-Initiated Deletion
 You can delete all your data at any time:
@@ -94,8 +94,8 @@ You can download all your personal data at any time:
 - **Tracing control**: Tracing is controlled by the Application operator through deployment configuration. Users cannot currently disable it from the interface. Do not use the Application if you do not consent to this processing while tracing is enabled.
 
 ### 6.2 LLM Providers (OpenAI, Grok, Groq, etc.)
-- **Purpose**: Process your questions through AI models
-- **Data Shared**: Question text, document excerpts (required for AI processing)
+- **Purpose**: Process your questions through AI models; when picture interpretation is enabled, describe pictures, charts, and diagrams in your document
+- **Data Shared**: Question text, document excerpts (required for AI processing); when picture interpretation is enabled, a downscaled image of each PDF page (or of an uploaded image) is sent once at upload time to a vision-capable model. Image metadata (such as EXIF) is removed before sending.
 - **Providers**: OpenAI, xAI, Groq, or other configured endpoints
 - **Privacy Policy**: Check your provider's policy (e.g., https://openai.com/policies/privacy-policy)
 - **Data Residency**: Depends on provider (usually US for major providers)
@@ -201,7 +201,7 @@ California residents can submit requests by contacting us (Section 10).
 
 **Email**: lazar87andreea@gmail.com
 
-**GitHub**: https://github.com/lazar87andreea-glitch/AI-DocuSearch  
+**GitHub**: https://github.com/andreea-nistor/AI-DocuSearch  
 **Response Time**: We aim to respond within 30 days
 
 No Data Protection Officer has been appointed because this is an individually operated experimental project, not a company. If you have concerns about data handling, contact the operator first. You may also contact:

@@ -1,6 +1,6 @@
 # Third-Party Services Used by AI DocuSearch
 
-**Last updated:** August 30, 2026
+**Last updated:** September 15, 2026
 
 AI DocuSearch relies on external services for language-model responses, optional diagnostics,
 language detection, feedback collection, and hosting. The service used in a particular deployment
@@ -14,6 +14,11 @@ are authorized to share the content with the applicable providers.
 AI DocuSearch sends your question, document metadata, and either relevant document excerpts or the
 full extracted document text to the configured OpenAI-compatible language-model provider. This is
 required to generate an answer.
+
+When the operator enables picture interpretation (`MULTIMODAL_ENABLED`), a downscaled image of each
+PDF page, or of an uploaded PNG/JPEG/WebP file, is also sent once at upload time to a vision-capable
+model at the same provider. Image metadata such as EXIF is removed before sending. The returned
+descriptions are stored with the session's extracted text and labeled as AI-generated in answers.
 
 The provider may be OpenAI, xAI, Groq, or another compatible service selected by the application
 operator. Its own privacy, security, retention, and international-transfer terms apply. The active

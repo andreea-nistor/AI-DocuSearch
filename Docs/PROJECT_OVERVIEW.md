@@ -404,7 +404,7 @@ Based on the current architecture, here are features that could enhance the app:
 
 ```bash
 # Clone repo
-git clone https://github.com/lazar87andreea-glitch/AI-DocuSearch
+git clone https://github.com/andreea-nistor/AI-DocuSearch
 cd AI-DocuSearch
 
 # Create virtual environment
@@ -469,8 +469,8 @@ LLM_MODEL=...
 
 ## 📞 Support & Feedback
 
-- 🐛 **Issues:** https://github.com/lazar87andreea-glitch/AI-DocuSearch/issues
-- 💬 **Discussions:** https://github.com/lazar87andreea-glitch/AI-DocuSearch/discussions
+- 🐛 **Issues:** https://github.com/andreea-nistor/AI-DocuSearch/issues
+- 💬 **Discussions:** https://github.com/andreea-nistor/AI-DocuSearch/discussions
 - 📧 **Contact:** Andreea Nistor
 
 ---

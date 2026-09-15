@@ -371,6 +371,7 @@ if __name__ == "__main__":
     test_missing_configuration_is_an_explicit_simulation()
     test_pipeline_propagates_provider_failure_state()
     test_page_request_selects_all_chunks_from_exact_pdf_page()
+    test_answer_discloses_selected_ai_generated_picture_description()
     test_page_request_detection_supports_ranges_and_languages()
     test_unavailable_page_request_does_not_use_unrelated_chunks()
     test_large_page_range_is_limited_explicitly()

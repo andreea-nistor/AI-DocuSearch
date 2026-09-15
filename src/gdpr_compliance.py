@@ -34,15 +34,15 @@ def show_consent_banner() -> bool:
         🔒 **Privacy & Data Processing Notice**
         
         By using AI DocuSearch, you consent to:
-        - **Processing your documents** with AI models (may be shared with LLM providers)
-        - **Storing chat history** for 30 days (auto-deleted after)
+        - **Processing your documents** with AI models (text excerpts, and page images when picture interpretation is enabled, are sent to the configured LLM provider)
+        - **Storing chat history** for 30 days and feedback for 90 days (auto-deleted after)
         - **Analytics & debugging** via LangSmith for performance monitoring
         - **Language detection** from your IP/browser headers
         
         ✅ **Your rights:**
         - 📥 Download your data anytime
         - 🗑️ Delete your data anytime
-        - ⏰ Auto-deletion after 30-90 days
+        - ⏰ Auto-deletion after 30 days (history) / 90 days (feedback)
         
         """)
 
@@ -140,7 +140,7 @@ def export_user_data(session_id: str, history_manager, feedback_manager=None) ->
                     "timestamp": entry.get("timestamp"),
                     "rating": entry.get("rating"),
                     "question": entry.get("question"),
-                    "type": entry.get("type"),
+                    "type": entry.get("feedback_type"),
                     "comment": entry.get("comment"),
                     "document": entry.get("document_name"),
                 })

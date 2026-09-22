@@ -8,7 +8,7 @@ from typing import Any
 
 from .ai_query import generate_answer_with_meta
 from .prompt_loader import load_prompt_with_temperature
-from .visual_content import PictureDescription
+from .visual_content import PictureDescription, neutralize_forged_markers
 
 NO_PICTURE_SENTINEL = "NO_MEANINGFUL_PICTURE"
 SUPPORTED_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
@@ -156,7 +156,7 @@ def describe_document_images(path: str, document_info: str = "Unknown") -> Visua
         result.descriptions.append(
             PictureDescription(
                 region_id=region_id,
-                description=answer,
+                description=neutralize_forged_markers(answer),
                 page_number=page_number,
                 source_kind="page" if page_number else "image",
             )

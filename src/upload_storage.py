@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import time
 from contextlib import contextmanager
@@ -8,6 +9,16 @@ from typing import BinaryIO
 
 UPLOAD_TEMP_DIR = Path(tempfile.gettempdir()) / "ai-docusearch"
 UPLOAD_PREFIX = "ai_docusearch_"
+_CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def sanitize_display_text(value: str, max_length: int = 150) -> str:
+    """Strip control/newline characters and cap length before an attacker-controlled string (for
+    example an uploaded filename) is shown in the UI or substituted into an LLM prompt.
+    """
+    cleaned = _CONTROL_CHAR_PATTERN.sub(" ", value or "")
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:max_length]
 
 
 def cleanup_stale_uploads(max_age_seconds: int = 3600) -> None:

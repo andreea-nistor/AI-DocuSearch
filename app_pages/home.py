@@ -98,7 +98,7 @@ traceable = _initialize_langsmith()
 from src.ingest import extract_text, get_pdf_page_count
 from src.ai_query import generate_answer_with_meta
 from src.pipeline import build_pipeline_from_text, answer_question
-from src.upload_storage import cleanup_stale_uploads, temporary_upload
+from src.upload_storage import cleanup_stale_uploads, sanitize_display_text, temporary_upload
 from src.prompt_loader import load_prompt_with_temperature
 from src.visual_content import attach_picture_descriptions
 from src.visual_ingest import (
@@ -852,7 +852,7 @@ if uploaded is not None:
                 if multimodal_enabled() and is_visual_source(file_path):
                     st.info(translate("interpreting_pictures"))
                     visual_result = describe_document_images(
-                        file_path, document_info=f"Document: {uploaded.name}"
+                        file_path, document_info=f"Document: {sanitize_display_text(uploaded.name)}"
                     )
 
             if visual_result is not None:
@@ -981,7 +981,7 @@ if st.session_state.document_text:
                 # Prepare document info for the LLM
                 document_info_parts = []
                 if st.session_state.get("uploaded_name"):
-                    document_info_parts.append(f"Document: {st.session_state.get('uploaded_name')}")
+                    document_info_parts.append(f"Document: {sanitize_display_text(st.session_state.get('uploaded_name', ''))}")
                 if st.session_state.get("page_count"):
                     document_info_parts.append(f"Pages: {st.session_state.get('page_count')}")
                 document_info = " | ".join(document_info_parts) if document_info_parts else "Unknown"

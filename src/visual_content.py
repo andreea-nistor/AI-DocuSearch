@@ -8,6 +8,21 @@ PICTURE_DESCRIPTION_PATTERN = re.compile(
     r"(?m)^\[PICTURE_DESCRIPTION:([A-Za-z0-9][A-Za-z0-9._-]*)\|AI_GENERATED\]\s*$"
 )
 REGION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+FORGEABLE_MARKER_PATTERN = re.compile(
+    r"(?m)^\[(PDF_PAGE:\d+|PICTURE_DESCRIPTION:[A-Za-z0-9][A-Za-z0-9._-]*\|AI_GENERATED)\]\s*$"
+)
+
+
+def neutralize_forged_markers(text: str) -> str:
+    """Break literal [PDF_PAGE:n] / [PICTURE_DESCRIPTION:...|AI_GENERATED] text already present in
+    raw extracted or model-generated content, so untrusted input can never forge the structural
+    markers that ingestion and vision code insert afterward. A zero-width non-joiner keeps the
+    text visually unchanged while breaking the exact-line pattern match used by chunking and
+    retrieval, so only genuinely inserted markers are ever parsed as real boundaries.
+    """
+    if not text:
+        return text
+    return FORGEABLE_MARKER_PATTERN.sub(lambda m: f"[\u200c{m.group(1)}]", text)
 
 
 @dataclass(frozen=True)

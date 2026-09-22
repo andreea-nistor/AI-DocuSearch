@@ -7,6 +7,23 @@ _PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 # Optional first line in a prompt file to set its temperature, e.g. "# temperature: 0.3"
 _TEMPERATURE_LINE_RE = re.compile(r"^#\s*temperature\s*:\s*([0-9]*\.?[0-9]+)\s*$", re.IGNORECASE)
 
+# Templates bound untrusted content with a literal <document>/</document> tag pair; neutralize any
+# pre-existing occurrence in a substituted value so untrusted text can never forge that boundary.
+_DOCUMENT_TAG_PATTERN = re.compile(r"</?document>", re.IGNORECASE)
+
+
+def _neutralize_delimiter_tags(value: Any) -> Any:
+    if isinstance(value, str) and _DOCUMENT_TAG_PATTERN.search(value):
+        return _DOCUMENT_TAG_PATTERN.sub(
+            lambda m: m.group(0).replace("<", "\u2039").replace(">", "\u203a"), value
+        )
+    return value
+
+
+def _safe_format(template: str, kwargs: dict) -> str:
+    safe_kwargs = {key: _neutralize_delimiter_tags(value) for key, value in kwargs.items()}
+    return template.format(**safe_kwargs)
+
 
 def _read_template(name: str) -> str:
     path = os.path.join(_PROMPTS_DIR, f"{name}.txt")
@@ -29,7 +46,7 @@ def _split_temperature_directive(template: str) -> Tuple[str, Optional[float]]:
 def load_prompt(name: str, **kwargs: Any) -> str:
     """Load prompts/<name>.txt and fill in its {placeholder} fields (ignores any temperature directive)."""
     template, _ = _split_temperature_directive(_read_template(name))
-    return template.format(**kwargs)
+    return _safe_format(template, kwargs)
 
 
 def load_prompt_with_temperature(name: str, **kwargs: Any) -> Tuple[str, float]:
@@ -39,7 +56,7 @@ def load_prompt_with_temperature(name: str, **kwargs: Any) -> Tuple[str, float]:
     else the LLM_TEMPERATURE env var, else 0.2.
     """
     template, file_temperature = _split_temperature_directive(_read_template(name))
-    prompt = template.format(**kwargs)
+    prompt = _safe_format(template, kwargs)
     if file_temperature is not None:
         return prompt, file_temperature
     env_temp = os.getenv("LLM_TEMPERATURE")

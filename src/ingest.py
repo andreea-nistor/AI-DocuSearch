@@ -2,6 +2,8 @@ import os
 import re
 from typing import List
 
+from .visual_content import neutralize_forged_markers
+
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 
 
@@ -23,7 +25,7 @@ def extract_text_from_pdf(path: str) -> str:
     reader = PdfReader(path)
     texts: List[str] = []
     for page_number, page in enumerate(reader.pages, start=1):
-        texts.append(_format_pdf_page(page_number, page.extract_text() or ""))
+        texts.append(_format_pdf_page(page_number, neutralize_forged_markers(page.extract_text() or "")))
     return "\n\n".join(texts).strip()
 
 
@@ -86,7 +88,7 @@ def extract_text_from_pdf_ocr(path: str, poppler_path: str | None = None) -> str
             text = pytesseract.image_to_string(img, lang=None)
         except Exception:
             text = ""
-        page_texts.append(_format_pdf_page(page_number, text))
+        page_texts.append(_format_pdf_page(page_number, neutralize_forged_markers(text)))
     return "\n\n".join(page_texts).strip()
 
 
@@ -109,12 +111,12 @@ def extract_text_from_docx(path: str) -> str:
             if cells:
                 parts.append(" | ".join(cells))
 
-    return "\n".join(parts).strip()
+    return neutralize_forged_markers("\n".join(parts).strip())
 
 
 def extract_text_from_text_file(path: str) -> str:
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        return f.read()
+        return neutralize_forged_markers(f.read())
 
 
 def extract_text_from_image(path: str) -> str:
@@ -127,7 +129,7 @@ def extract_text_from_image(path: str) -> str:
         if env_tesseract:
             pytesseract.pytesseract.tesseract_cmd = env_tesseract
         with Image.open(path) as img:
-            return (pytesseract.image_to_string(img, lang=None) or "").strip()
+            return neutralize_forged_markers((pytesseract.image_to_string(img, lang=None) or "").strip())
     except Exception:
         return ""
 

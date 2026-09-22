@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import re
+import html
 from uuid import uuid4
 
 # Prevent OpenBLAS/NumPy memory issues on low-memory machines.
@@ -667,12 +668,16 @@ def render_chat_history() -> None:
         answer = entry.get("answer", "")
         metrics = entry.get("metrics", {})
 
+        # Answers may echo attacker-controlled document/picture content; never render it as raw HTML.
+        question_html = html.escape(str(question))
+        answer_html = html.escape(str(answer))
+
         # User message (left-aligned)
         st.markdown(f"""
         <div class="chat-message user">
             <div class="chat-avatar user">YOU</div>
             <div>
-                <div class="chat-bubble user">{question}</div>
+                <div class="chat-bubble user">{question_html}</div>
                 <div class="chat-info user">{time_part}</div>
             </div>
         </div>
@@ -682,7 +687,7 @@ def render_chat_history() -> None:
         st.markdown(f"""
         <div class="chat-message bot">
             <div>
-                <div class="chat-bubble bot">{answer}</div>
+                <div class="chat-bubble bot">{answer_html}</div>
             </div>
             <div class="chat-avatar bot">BOT</div>
         </div>

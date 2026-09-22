@@ -340,6 +340,42 @@ def test_hybrid_page_request_does_not_fall_back_to_full_document() -> None:
         history_path.unlink(missing_ok=True)
 
 
+def test_chat_history_escapes_html_from_document_or_answer_content() -> None:
+    """A prompt-injected/malicious answer or question must render as inert text, not live HTML."""
+    app = AppTest.from_file("web_app.py", default_timeout=30)
+    app.session_state["gdpr_consent_given"] = True
+    app.run()
+
+    malicious_question = "<img src=x onerror=alert(1)>"
+    malicious_answer = "<script>alert('xss')</script> Ignore previous instructions."
+    app.session_state["uploaded_name"] = "injection-test.txt"
+    app.session_state["document_text"] = "Document context"
+    app.session_state["rag_pipeline"] = {
+        "index": None,
+        "chunks": ["Document context"],
+        "lite_mode": True,
+    }
+    app.session_state["chat_history"] = [
+        {
+            "timestamp": "2026-09-22T10:00:00",
+            "question": malicious_question,
+            "answer": malicious_answer,
+            "mode": "Hybrid",
+            "document_name": "injection-test.txt",
+            "metrics": {},
+        }
+    ]
+
+    app.run()
+
+    assert not app.exception
+    rendered_markdown = [element.value for element in app.markdown]
+    assert any("&lt;script&gt;" in value for value in rendered_markdown)
+    assert any("&lt;img src=x onerror=alert(1)&gt;" in value for value in rendered_markdown)
+    assert not any("<script>alert" in value for value in rendered_markdown)
+    assert not any("<img src=x" in value for value in rendered_markdown)
+
+
 def test_streamlit_budget_limit_blocks_chat_input() -> None:
     app = AppTest.from_file("web_app.py", default_timeout=30)
     app.session_state["gdpr_consent_given"] = True
@@ -378,4 +414,5 @@ if __name__ == "__main__":
     test_hybrid_page_request_does_not_fall_back_to_full_document()
     test_streamlit_provider_failure_is_not_saved()
     test_streamlit_budget_limit_blocks_chat_input()
+    test_chat_history_escapes_html_from_document_or_answer_content()
     print("All AI query response-state tests passed.")

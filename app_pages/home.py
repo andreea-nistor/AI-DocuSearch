@@ -95,7 +95,7 @@ def _initialize_langsmith():
 traceable = _initialize_langsmith()
 
 # NOW import src modules (they will use traceable decorator with env vars set)
-from src.ingest import extract_text, get_pdf_page_count
+from src.ingest import extract_text, get_pdf_page_count, PdfExtractionError
 from src.ai_query import generate_answer_with_meta
 from src.pipeline import DocumentTooLargeError, build_pipeline_from_text, answer_question
 from src.upload_storage import cleanup_stale_uploads, sanitize_display_text, temporary_upload
@@ -175,20 +175,26 @@ if "history_manager" not in st.session_state:
 # Initialize cost tracker for this session
 initialize_cost_tracker()
 
-# Run cleanup on every app load (targets old sessions, doesn't affect current one)
-history_enabled = os.getenv("HISTORY_ENABLED", "true").lower() in ("true", "1", "yes")
-if history_enabled:
+# History/feedback retention cleanup scans the whole directory; cache_resource keeps this to at
+# most once per hour process-wide instead of a full directory scan on every single rerun.
+@st.cache_resource(ttl=3600)
+def _run_retention_cleanup_once_per_hour() -> None:
+    if os.getenv("HISTORY_ENABLED", "true").lower() in ("true", "1", "yes"):
+        try:
+            retention_days = int(os.getenv("HISTORY_RETENTION_DAYS", "30"))
+            HistoryManager.cleanup_old_sessions(retention_days=retention_days)
+        except Exception:
+            pass
     try:
-        retention_days = int(os.getenv("HISTORY_RETENTION_DAYS", "30"))
-        HistoryManager.cleanup_old_sessions(retention_days=retention_days)
+        FeedbackManager.cleanup_old_feedback(
+            retention_days=int(os.getenv("FEEDBACK_RETENTION_DAYS", "90"))
+        )
     except Exception:
         pass
-try:
-    FeedbackManager.cleanup_old_feedback(
-        retention_days=int(os.getenv("FEEDBACK_RETENTION_DAYS", "90"))
-    )
-except Exception:
-    pass
+
+
+history_enabled = os.getenv("HISTORY_ENABLED", "true").lower() in ("true", "1", "yes")
+_run_retention_cleanup_once_per_hour()
 
 # Check if on mobile
 is_mobile = is_mobile_browser()
@@ -943,6 +949,12 @@ if uploaded is not None:
             st.session_state.rag_pipeline = None
             st.session_state.page_count = None
             print(f"[WARNING] Document rejected as too large: {e}", file=sys.stderr)
+        except PdfExtractionError as e:
+            st.error(f"📄 **Could not read this PDF**: {e}")
+            st.session_state.document_text = None
+            st.session_state.rag_pipeline = None
+            st.session_state.page_count = None
+            print(f"[WARNING] PDF extraction failed: {e}", file=sys.stderr)
         except Exception as e:
             st.error(f"{translate('failed_extract')}: {type(e).__name__}: {e}")
             st.session_state.document_text = None

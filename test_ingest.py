@@ -12,6 +12,7 @@ from src.ingest import (
     extract_text_from_pdf,
     extract_text_from_pdf_ocr,
     extract_text_from_text_file,
+    PdfExtractionError,
 )
 from src.pipeline import DocumentTooLargeError, build_pipeline_from_text, _available_memory_gb
 from src.preprocess import chunk_text
@@ -88,6 +89,30 @@ def test_extract_text_doc_unsupported():
             assert ".doc format is not supported" in str(exc)
     finally:
         os.remove(path)
+
+
+def test_corrupted_pdf_raises_friendly_error_instead_of_raw_exception():
+    with patch("pypdf.PdfReader", side_effect=ValueError("EOF marker not found")):
+        try:
+            extract_text_from_pdf("example.pdf")
+            assert False, "Expected PdfExtractionError"
+        except PdfExtractionError as exc:
+            assert "could not be read" in str(exc)
+            assert "ValueError" in str(exc)
+
+
+def test_corrupted_pdf_is_not_swallowed_by_the_ocr_fallback():
+    path = Path("temp_corrupted_pdf_test.pdf")
+    path.touch()
+    try:
+        with patch("pypdf.PdfReader", side_effect=ValueError("EOF marker not found")):
+            try:
+                extract_text(str(path))
+                assert False, "Expected PdfExtractionError to propagate"
+            except PdfExtractionError:
+                pass
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def test_searchable_pdf_extraction_preserves_page_numbers():
@@ -349,6 +374,8 @@ def run_tests():
     test_extract_text_file_not_found()
     test_extract_text_docx_support()
     test_extract_text_doc_unsupported()
+    test_corrupted_pdf_raises_friendly_error_instead_of_raw_exception()
+    test_corrupted_pdf_is_not_swallowed_by_the_ocr_fallback()
     test_searchable_pdf_extraction_preserves_page_numbers()
     test_ocr_pdf_extraction_preserves_empty_page_numbers()
     test_marker_only_pdf_extraction_triggers_ocr()

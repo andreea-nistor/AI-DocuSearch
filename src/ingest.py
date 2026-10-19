@@ -7,6 +7,10 @@ from .visual_content import neutralize_forged_markers
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 
 
+class PdfExtractionError(Exception):
+    """Raised when a PDF cannot be parsed at all (e.g. corrupted or password-protected)."""
+
+
 def _format_pdf_page(page_number: int, text: str) -> str:
     return f"[PDF_PAGE:{page_number}]\n{text.strip()}"
 
@@ -22,11 +26,18 @@ def extract_text_from_pdf(path: str) -> str:
     except Exception as exc:
         raise RuntimeError("pypdf is required for PDF extraction. Install with `pip install pypdf`") from exc
 
-    reader = PdfReader(path)
-    texts: List[str] = []
-    for page_number, page in enumerate(reader.pages, start=1):
-        texts.append(_format_pdf_page(page_number, neutralize_forged_markers(page.extract_text() or "")))
-    return "\n\n".join(texts).strip()
+    try:
+        reader = PdfReader(path)
+        texts: List[str] = []
+        for page_number, page in enumerate(reader.pages, start=1):
+            texts.append(_format_pdf_page(page_number, neutralize_forged_markers(page.extract_text() or "")))
+        return "\n\n".join(texts).strip()
+    except Exception as exc:
+        raise PdfExtractionError(
+            f"This PDF could not be read ({type(exc).__name__}). It may be corrupted, "
+            "password-protected, or use an unsupported internal format. Try removing any "
+            "password protection or re-saving the PDF before uploading again."
+        ) from exc
 
 
 def get_pdf_page_count(path: str) -> int:

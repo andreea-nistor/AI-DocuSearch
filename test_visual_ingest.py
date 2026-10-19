@@ -206,6 +206,25 @@ def test_render_failure_returns_fallback_reason_without_raising() -> None:
     assert "poppler missing" in (result.fallback_reason or "")
 
 
+def test_prompt_template_failure_mid_loop_does_not_raise() -> None:
+    """describe_document_images() promises it never raises; a broken prompt template must not
+    break that contract even partway through the per-page loop."""
+    pages = [(1, _blank_image())]
+
+    with (
+        patch("src.visual_ingest._render_pdf_pages", return_value=(pages, False)),
+        patch(
+            "src.visual_ingest.load_prompt_with_temperature",
+            side_effect=FileNotFoundError("prompts/picture_description_prompt.txt"),
+        ),
+    ):
+        result = describe_document_images("report.pdf")
+
+    assert isinstance(result, VisualIngestResult)
+    assert result.descriptions == []
+    assert "FileNotFoundError" in (result.fallback_reason or "")
+
+
 def test_standalone_image_validation_limits() -> None:
     png_path = Path("temp_visual_test.png")
     gif_path = Path("temp_visual_test.gif")
@@ -275,6 +294,7 @@ if __name__ == "__main__":
     test_provider_error_keeps_partial_descriptions_and_stops()
     test_missing_vision_configuration_is_reported_without_descriptions()
     test_render_failure_returns_fallback_reason_without_raising()
+    test_prompt_template_failure_mid_loop_does_not_raise()
     test_standalone_image_validation_limits()
     test_data_url_downscales_and_reencodes_as_jpeg()
     test_standalone_image_upload_is_described_and_never_read_as_text()

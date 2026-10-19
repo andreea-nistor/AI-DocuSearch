@@ -126,11 +126,15 @@ def describe_document_images(path: str, document_info: str = "Unknown") -> Visua
             result.fallback_reason = f"Could not encode {page_label}: {type(exc).__name__}"
             break
 
-        prompt, temperature = load_prompt_with_temperature(
-            "picture_description_prompt",
-            document_info=document_info,
-            page_label=page_label,
-        )
+        try:
+            prompt, temperature = load_prompt_with_temperature(
+                "picture_description_prompt",
+                document_info=document_info,
+                page_label=page_label,
+            )
+        except Exception as exc:
+            result.fallback_reason = f"Could not build vision prompt: {type(exc).__name__}"
+            break
         meta = generate_answer_with_meta(prompt, temperature=temperature, images=[data_url])
         status = meta.get("response_status")
         if status == "simulated":

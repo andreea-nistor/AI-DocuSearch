@@ -97,7 +97,7 @@ traceable = _initialize_langsmith()
 # NOW import src modules (they will use traceable decorator with env vars set)
 from src.ingest import extract_text, get_pdf_page_count
 from src.ai_query import generate_answer_with_meta
-from src.pipeline import build_pipeline_from_text, answer_question
+from src.pipeline import DocumentTooLargeError, build_pipeline_from_text, answer_question
 from src.upload_storage import cleanup_stale_uploads, sanitize_display_text, temporary_upload
 from src.prompt_loader import load_prompt_with_temperature
 from src.visual_content import attach_picture_descriptions
@@ -882,6 +882,10 @@ if uploaded is not None:
                     document_text,
                     use_embeddings=True,
                 )
+            except DocumentTooLargeError:
+                # Too large to safely chunk/embed; refuse the document rather than falling back
+                # to Direct LLM with the full untruncated text.
+                raise
             except Exception as pipeline_error:
                 st.session_state.rag_pipeline = None
                 print(
@@ -933,6 +937,12 @@ if uploaded is not None:
             st.session_state.rag_pipeline = None
             st.session_state.page_count = None
             print(f"[WARNING] Text extraction (OCR): {e}", file=sys.stderr)
+        except DocumentTooLargeError as e:
+            st.error(f"📏 **Document too large**: {e}")
+            st.session_state.document_text = None
+            st.session_state.rag_pipeline = None
+            st.session_state.page_count = None
+            print(f"[WARNING] Document rejected as too large: {e}", file=sys.stderr)
         except Exception as e:
             st.error(f"{translate('failed_extract')}: {type(e).__name__}: {e}")
             st.session_state.document_text = None

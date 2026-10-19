@@ -13,7 +13,7 @@ from src.ingest import (
     extract_text_from_pdf_ocr,
     extract_text_from_text_file,
 )
-from src.pipeline import build_pipeline_from_text
+from src.pipeline import DocumentTooLargeError, build_pipeline_from_text, _available_memory_gb
 from src.preprocess import chunk_text
 from src.visual_content import (
     PDF_PAGE_MARKER_PATTERN,
@@ -294,6 +294,33 @@ def test_pipeline_remains_usable_after_upload_cleanup():
     assert pipeline["chunks"] == ["The contract starts on Monday."]
 
 
+def test_available_memory_detection_never_returns_the_old_zero_sentinel():
+    result = _available_memory_gb()
+    assert result is None or (isinstance(result, float) and result > 0)
+
+
+def test_oversized_document_is_rejected_before_chunking_or_embedding():
+    with patch("src.pipeline.MAX_DOCUMENT_MB", 0.0001):
+        try:
+            build_pipeline_from_text("x" * 1000, use_embeddings=False)
+            assert False, "Expected DocumentTooLargeError"
+        except DocumentTooLargeError as exc:
+            assert "MB" in str(exc)
+
+
+def test_small_document_is_not_affected_by_the_size_cap():
+    pipeline = build_pipeline_from_text("Small document.", use_embeddings=False)
+    assert pipeline["chunks"] == ["Small document."]
+
+
+def test_low_available_memory_falls_back_to_lite_mode_without_loading_embeddings():
+    with patch("src.pipeline._available_memory_gb", return_value=0.5):
+        pipeline = build_pipeline_from_text("Some document text.", use_embeddings=True)
+
+    assert pipeline["lite_mode"] is True
+    assert pipeline["index"] is None
+
+
 def test_stale_upload_cleanup_is_scoped():
     UPLOAD_TEMP_DIR.mkdir(parents=True, exist_ok=True)
     stale_upload = UPLOAD_TEMP_DIR / f"{UPLOAD_PREFIX}stale.txt"
@@ -335,6 +362,10 @@ def run_tests():
     test_temporary_upload_cleanup_after_success()
     test_temporary_upload_cleanup_after_failure()
     test_pipeline_remains_usable_after_upload_cleanup()
+    test_available_memory_detection_never_returns_the_old_zero_sentinel()
+    test_oversized_document_is_rejected_before_chunking_or_embedding()
+    test_small_document_is_not_affected_by_the_size_cap()
+    test_low_available_memory_falls_back_to_lite_mode_without_loading_embeddings()
     test_stale_upload_cleanup_is_scoped()
     print("All ingestion tests completed.")
 

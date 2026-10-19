@@ -18,6 +18,15 @@ PDF_PAGE_REQUEST_PATTERN = re.compile(
 )
 MAX_REQUESTED_PDF_PAGES = 5
 MAX_PAGE_CONTEXT_CHARS = 30_000
+# Extracted text larger than this is refused before chunking/embedding instead of risking an
+# OOM kill; override via env var for deployments with more available memory.
+MAX_DOCUMENT_MB = float(os.getenv("MAX_DOCUMENT_MB", "50"))
+# Below this much available system memory, skip embeddings and use keyword search instead.
+MIN_AVAILABLE_MEMORY_GB = float(os.getenv("MIN_AVAILABLE_MEMORY_GB", "2.0"))
+
+
+class DocumentTooLargeError(Exception):
+    """Raised when extracted text exceeds MAX_DOCUMENT_MB, before any expensive processing."""
 
 # Import traceable from langsmith (initialized by app_pages/home.py with credentials)
 try:
@@ -32,6 +41,58 @@ except Exception:
         def _decorator(fn: _F) -> _F:
             return fn
         return _decorator
+
+
+def _available_memory_gb() -> float | None:
+    """Best-effort available system memory in GB, or None if it cannot be determined.
+
+    Tries POSIX os.sysconf (works in Linux containers, e.g. Streamlit Cloud, and macOS),
+    then /proc/meminfo, then the Windows GlobalMemoryStatusEx API. Returns None rather than 0
+    when unknown so callers never mistake "could not detect" for "no memory available".
+    """
+    try:
+        sysconf_names = os.sysconf_names
+        if "SC_AVPHYS_PAGES" in sysconf_names and "SC_PAGE_SIZE" in sysconf_names:
+            pages = os.sysconf("SC_AVPHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            if pages > 0 and page_size > 0:
+                return (pages * page_size) / (1024 ** 3)
+    except (AttributeError, ValueError, OSError):
+        pass
+
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / (1024 ** 2)
+    except (OSError, ValueError, IndexError):
+        pass
+
+    try:
+        import ctypes
+
+        if hasattr(ctypes, "windll") and hasattr(ctypes.windll, "kernel32"):
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_uint64),
+                    ("ullAvailPhys", ctypes.c_uint64),
+                    ("ullTotalPageFile", ctypes.c_uint64),
+                    ("ullAvailPageFile", ctypes.c_uint64),
+                    ("ullTotalVirtual", ctypes.c_uint64),
+                    ("ullAvailVirtual", ctypes.c_uint64),
+                    ("ullAvailExtendedVirtual", ctypes.c_uint64),
+                ]
+
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+            return stat.ullAvailPhys / (1024 ** 3)
+    except Exception:
+        pass
+
+    return None
 
 
 @traceable(run_type="chain", name="build_pipeline")
@@ -50,8 +111,12 @@ def build_pipeline_from_text(text: str, use_embeddings: bool | None = None) -> D
     text_size_mb = len(text) / (1024 * 1024)
     print(f"[PIPELINE] Extracted {len(text)} chars ({text_size_mb:.2f} MB)", file=sys.stderr)
     
-    if text_size_mb > 50:
-        print(f"[PIPELINE] WARNING: Text is very large ({text_size_mb:.2f} MB). This may cause memory issues.", file=sys.stderr)
+    if text_size_mb > MAX_DOCUMENT_MB:
+        raise DocumentTooLargeError(
+            f"This document's extracted text is {text_size_mb:.1f} MB, which exceeds the "
+            f"{MAX_DOCUMENT_MB:.0f} MB processing limit. Try a smaller file or split it into "
+            "sections."
+        )
     
     print(f"[PIPELINE] Cleaning text...", file=sys.stderr)
     cleaned = clean_text(text)
@@ -77,36 +142,12 @@ def build_pipeline_from_text(text: str, use_embeddings: bool | None = None) -> D
         print(f"[PIPELINE] Using LITE mode (no embeddings)", file=sys.stderr)
         return {"index": None, "chunks": chunks, "lite_mode": True}
     # Before attempting to load embedding models, do a quick memory check to avoid OOM crashes.
-    def _available_memory_gb():
-        try:
-            import ctypes
-
-            class MEMORYSTATUSEX(ctypes.Structure):
-                _fields_ = [
-                    ("dwLength", ctypes.c_ulong),
-                    ("dwMemoryLoad", ctypes.c_ulong),
-                    ("ullTotalPhys", ctypes.c_uint64),
-                    ("ullAvailPhys", ctypes.c_uint64),
-                    ("ullTotalPageFile", ctypes.c_uint64),
-                    ("ullAvailPageFile", ctypes.c_uint64),
-                    ("ullTotalVirtual", ctypes.c_uint64),
-                    ("ullAvailVirtual", ctypes.c_uint64),
-                    ("ullAvailExtendedVirtual", ctypes.c_uint64),
-                ]
-
-            stat = MEMORYSTATUSEX()
-            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-            if hasattr(ctypes, "windll") and hasattr(ctypes.windll, "kernel32"):
-                ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
-                return stat.ullAvailPhys / (1024 ** 3)
-        except Exception:
-            pass
-        return 0
-
     avail_gb = _available_memory_gb()
-    print(f"[PIPELINE] Available memory: {avail_gb:.2f} GB", file=sys.stderr)
-    # If less than 2 GB available, avoid embeddings
-    if avail_gb and avail_gb < 2.0:
+    print(
+        f"[PIPELINE] Available memory: {'unknown' if avail_gb is None else f'{avail_gb:.2f} GB'}",
+        file=sys.stderr,
+    )
+    if avail_gb is not None and avail_gb < MIN_AVAILABLE_MEMORY_GB:
         print(f"[PIPELINE] Low memory ({avail_gb:.2f} GB). Falling back to LITE mode.", file=sys.stderr)
         return {"index": None, "chunks": chunks, "lite_mode": True}
 

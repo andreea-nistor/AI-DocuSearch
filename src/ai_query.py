@@ -58,7 +58,7 @@ def _get_langsmith_client() -> Optional[Any]:
         
         from langsmith import Client
         print(f"[LANGSMITH] Creating Client with project: {os.getenv('LANGSMITH_PROJECT', 'default')}", file=sys.stderr)
-        client = Client()
+        client = Client(timeout_ms=(5000, 10000))
         print(f"[LANGSMITH] Client created successfully", file=sys.stderr)
         return client
     except Exception as e:

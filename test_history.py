@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Test script for history tracking feature."""
 
+import os
 import sys
 import json
 import time
@@ -264,6 +265,29 @@ def test_cleanup():
     print("✓ PASSED: Cleanup old sessions")
 
 
+def test_atomic_write_preserves_original_on_failure():
+    """A failed write must leave the existing file intact and no temp files behind."""
+    import tempfile
+    from src.json_io import write_json_atomic
+
+    print("\nTEST: Atomic JSON write preserves original on failure")
+    with tempfile.TemporaryDirectory() as tmp:
+        target = os.path.join(tmp, "user_x.json")
+        write_json_atomic(target, [{"q": "original"}])
+
+        try:
+            write_json_atomic(target, [{"q": object()}])  # not JSON-serializable
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("Expected TypeError for unserializable data")
+
+        with open(target, "r", encoding="utf-8") as f:
+            assert json.load(f) == [{"q": "original"}], "Original file was modified"
+        assert os.listdir(tmp) == ["user_x.json"], f"Temp file left behind: {os.listdir(tmp)}"
+    print("✓ PASSED: Atomic JSON write preserves original on failure")
+
+
 def main():
     """Run all tests."""
     cleanup_test_history()
@@ -280,6 +304,7 @@ def main():
         test_streamlit_session_ids_are_unique()
         test_data_structure()
         test_cleanup()
+        test_atomic_write_preserves_original_on_failure()
         
         print("\n" + "=" * 60)
         print("✓ All tests passed!")

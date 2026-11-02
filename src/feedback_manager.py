@@ -10,6 +10,8 @@ import os
 from typing import Any, List, Dict, Optional
 from datetime import datetime, timezone
 
+from .json_io import write_json_atomic
+
 
 class FeedbackManager:
     """Manages user feedback collection and storage (per-session isolation)"""
@@ -198,8 +200,7 @@ class FeedbackManager:
         Args:
             feedback_data: List of feedback entries to save
         """
-        with open(self.feedback_file, "w", encoding="utf-8") as f:
-            json.dump(feedback_data, f, indent=2, ensure_ascii=False)
+        write_json_atomic(self.feedback_file, feedback_data)
 
     @staticmethod
     def cleanup_old_feedback(retention_days: int = 90) -> None:

@@ -24,7 +24,7 @@ def submit_langsmith_feedback(
     try:
         from langsmith import Client
 
-        Client().create_feedback(
+        Client(timeout_ms=(5000, 10000)).create_feedback(
             run_id=run_id,
             key="user_rating",
             score=1 if rating else 0,

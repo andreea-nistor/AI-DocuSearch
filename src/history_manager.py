@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+from .json_io import write_json_atomic
+
 
 class HistoryManager:
     """Manages per-session question history with document filtering and multi-user isolation."""
@@ -158,7 +160,6 @@ class HistoryManager:
     def _save_json(self, data: List[Dict[str, Any]]) -> None:
         """Save history to JSON file with proper formatting."""
         try:
-            with open(self.history_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            write_json_atomic(self.history_file, data)
         except IOError as e:
             print(f"[HISTORY] Could not save history: {e}")

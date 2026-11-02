@@ -75,23 +75,33 @@ def image_to_data_url(image: Any, max_edge: int | None = None) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
-def _render_pdf_pages(path: str, max_pages: int) -> tuple[list[tuple[int, Any]], bool]:
-    from pdf2image import convert_from_path
+def _pdf_page_numbers(path: str, max_pages: int) -> tuple[list[int], bool]:
+    """Return which physical pages to render, without decoding any page image yet."""
     from pdf2image.pdfinfo import pdfinfo_from_path
 
     poppler_path = os.environ.get("POPPLER_PATH") or None
     info = pdfinfo_from_path(path, poppler_path=poppler_path)
     total_pages = int(info.get("Pages", 0) or 0)
+    page_count = min(total_pages, max_pages) if total_pages else max_pages
+    return list(range(1, page_count + 1)), total_pages > max_pages
+
+
+def _render_single_pdf_page(path: str, page_number: int) -> Any:
+    """Render exactly one PDF page, so only one decoded bitmap is ever held in memory at a time
+    (rather than every page in the document up front).
+    """
+    from pdf2image import convert_from_path
+
+    poppler_path = os.environ.get("POPPLER_PATH") or None
     dpi = _int_env("VISION_RENDER_DPI", DEFAULT_RENDER_DPI)
     images = convert_from_path(
         path,
         dpi=dpi,
-        first_page=1,
-        last_page=min(total_pages, max_pages) if total_pages else max_pages,
+        first_page=page_number,
+        last_page=page_number,
         poppler_path=poppler_path,
     )
-    pages = [(page_number, image) for page_number, image in enumerate(images, start=1)]
-    return pages, total_pages > max_pages
+    return images[0]
 
 
 def describe_document_images(path: str, document_info: str = "Unknown") -> VisualIngestResult:
@@ -107,9 +117,9 @@ def describe_document_images(path: str, document_info: str = "Unknown") -> Visua
 
     try:
         if ext == ".pdf":
-            sources, result.pages_truncated = _render_pdf_pages(path, max_pages)
+            page_numbers, result.pages_truncated = _pdf_page_numbers(path, max_pages)
         elif ext in SUPPORTED_IMAGE_EXTENSIONS:
-            sources = [(None, load_validated_image(path))]
+            page_numbers = [None]
         else:
             result.fallback_reason = f"Unsupported visual source: {ext or 'no extension'}"
             return result
@@ -118,13 +128,28 @@ def describe_document_images(path: str, document_info: str = "Unknown") -> Visua
         result.elapsed_seconds = time.perf_counter() - start
         return result
 
-    for page_number, image in sources:
+    for page_number in page_numbers:
         page_label = f"Physical PDF page {page_number}" if page_number else "Uploaded image"
+        try:
+            image = (
+                _render_single_pdf_page(path, page_number)
+                if page_number is not None
+                else load_validated_image(path)
+            )
+        except Exception as exc:
+            result.fallback_reason = (
+                f"Could not render {page_label}: {type(exc).__name__}: {exc}"
+            )
+            break
+
         try:
             data_url = image_to_data_url(image)
         except Exception as exc:
             result.fallback_reason = f"Could not encode {page_label}: {type(exc).__name__}"
             break
+        finally:
+            # Drop the decoded bitmap before calling the provider; only the encoded JPEG is needed.
+            image = None
 
         try:
             prompt, temperature = load_prompt_with_temperature(

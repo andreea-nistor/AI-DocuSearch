@@ -39,7 +39,8 @@ def build_pipeline(file_path: str, use_embeddings: bool | None = None) -> Dict[s
 1. **Extract Text (Step 1)**
    - Call `extract_text(file_path)` from ingest module
    - Reads PDF, DOCX, or text file
-   - Returns raw text string; warns to `stderr` if extracted text exceeds 50 MB
+   - Returns raw text string. If the extracted text exceeds `MAX_DOCUMENT_MB` (default 50 MB),
+     `DocumentTooLargeError` is raised before chunking or embedding.
 
 2. **Clean & Chunk (Step 2)**
    - Call `clean_text(text)` to remove artifacts
@@ -54,10 +55,11 @@ def build_pipeline(file_path: str, use_embeddings: bool | None = None) -> Dict[s
      - Passing `use_embeddings=False` also selects keyword retrieval directly.
 
 4. **Memory guard (only when not in lite mode)**
-   - Before loading the embedding model, checks available physical memory on Windows via
-     `ctypes`/`GlobalMemoryStatusEx`.
-   - If available memory is below 2 GB, falls back to lite mode (`index: None`) instead of risking
-     an out-of-memory crash.
+   - Before loading the embedding model, checks available physical memory via `os.sysconf`,
+     `/proc/meminfo`, then Windows `GlobalMemoryStatusEx`.
+   - If available memory is below `MIN_AVAILABLE_MEMORY_GB` (default 2.0), falls back to lite mode
+     (`index: None`) instead of risking an out-of-memory crash. If memory cannot be determined, the
+     check is skipped and embeddings are attempted.
 
 5. **Build Index (Step 3)**
    - Create `EmbedIndex()` object and call `index.build_index(chunks)`.
@@ -91,7 +93,8 @@ def build_pipeline(file_path: str, use_embeddings: bool | None = None) -> Dict[s
     if not use_embeddings:
         return {"index": None, "chunks": chunks, "lite_mode": True}
 
-    if _available_memory_gb() < 2.0:
+    avail_gb = _available_memory_gb()
+    if avail_gb is not None and avail_gb < MIN_AVAILABLE_MEMORY_GB:
         return {"index": None, "chunks": chunks, "lite_mode": True}
 
     index = EmbedIndex()
@@ -124,7 +127,8 @@ The Streamlit app and callers that omit `use_embeddings` use different configura
 | `use_embeddings=False` passed explicitly | Keyword retrieval — `index=None` |
 | `use_embeddings` omitted and `DOCUSEARCH_LITE_MODE=true` (default) | Keyword retrieval — `index=None` |
 | `use_embeddings` omitted and `DOCUSEARCH_LITE_MODE=false` | Embedding attempt |
-| Available memory < 2 GB | Forced lite mode, even if `use_embeddings=True` |
+| Available memory < `MIN_AVAILABLE_MEMORY_GB` (default 2 GB) | Forced lite mode, even if `use_embeddings=True`; skipped when memory is unknown |
+| Extracted text > `MAX_DOCUMENT_MB` (default 50 MB) | `DocumentTooLargeError` raised before chunking or embedding |
 | `EmbedIndex` fails to load the model or build embeddings (e.g. `MemoryError`) | Forced lite mode |
 
 When `index` is `None`, `answer_question` (Step 5.2) uses a keyword-overlap search instead of
@@ -317,7 +321,7 @@ answer_question(pipeline, question, top_k=10)
 - `build_pipeline(file_path: str, use_embeddings: bool | None = None) -> Dict[str, Any]`
 - `answer_question(pipeline: Dict[str, Any], question: str, top_k: int = 3, temperature: float | None = None) -> Dict[str, Any]`
 - `_lightweight_indices(chunks: list[str], question: str, top_k: int = 3) -> list[int]` (internal, lite-mode retrieval)
-- `_available_memory_gb() -> float` (internal, Windows-only memory check)
+- `_available_memory_gb() -> float | None` (internal; `os.sysconf`, `/proc/meminfo`, then Windows; `None` if unknown)
 
 **Module Imports:**
 ```python
@@ -333,6 +337,8 @@ import time
 **Environment variables:**
 - `DOCUSEARCH_LITE_MODE` — controls only callers that omit `use_embeddings`; it does not affect
     the Streamlit app, which passes `use_embeddings=True`
+- `MAX_DOCUMENT_MB` (default 50) — extracted-text size limit; larger documents raise `DocumentTooLargeError`
+- `MIN_AVAILABLE_MEMORY_GB` (default 2.0) — available-memory threshold for the lite-mode fallback
 
 **Dependencies:**
 - All previous steps (ingest, preprocess, embed_index, ai_query)

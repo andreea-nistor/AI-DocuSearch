@@ -192,7 +192,7 @@ class FeedbackManager:
 ```
 
 **Key methods:**
-- `add_feedback()` — Appends new feedback entry to session's JSON file
+- `add_feedback()` — Appends new feedback entry to session's JSON file (written atomically via temp file and `os.replace`)
 - `load_feedback()` — Reads all feedback, sorted newest first
 - `get_feedback_summary()` — Aggregate statistics for this session
 - `update_feedback_rating()` — Edit an existing feedback entry's rating

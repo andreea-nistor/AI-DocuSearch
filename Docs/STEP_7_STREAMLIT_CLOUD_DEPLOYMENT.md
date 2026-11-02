@@ -108,6 +108,10 @@ HISTORY_RETENTION_DAYS = "30"
 HISTORY_LIMIT = "10"
 FEEDBACK_RETENTION_DAYS = "90"
 
+# Optional: resource limits
+MAX_DOCUMENT_MB = "50"
+MIN_AVAILABLE_MEMORY_GB = "2.0"
+
 # Optional: picture interpretation (Step 12, disabled by default)
 MULTIMODAL_ENABLED = "false"
 VISION_MODEL = "gpt-4o-mini"

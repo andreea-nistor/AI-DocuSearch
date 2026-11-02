@@ -36,6 +36,7 @@ def extract_text_from_pdf(path: str) -> str:
 
 **Error Handling:**
 - If `pypdf` is not installed, raises `RuntimeError` with installation instructions
+- Corrupted, encrypted, or unreadable PDFs raise `PdfExtractionError` with a user-facing message
 
 **Example:**
 ```python

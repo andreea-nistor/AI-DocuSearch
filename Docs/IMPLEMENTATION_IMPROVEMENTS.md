@@ -323,15 +323,15 @@ if hasattr(st, 'secrets') and st.secrets:
 - Streamlit timeout during processing
 
 **What Should Happen:**
-- PDF extraction: Warn if > 50 MB but continue
+- Text extraction: Refuse if extracted text > `MAX_DOCUMENT_MB` (default 50 MB) with a user-facing `DocumentTooLargeError`
 - Chunking: Auto-reduce chunk size if too many chunks
-- Embedding: Lite mode fallback if memory < 2 GB
+- Embedding: Lite mode fallback if available memory < `MIN_AVAILABLE_MEMORY_GB` (default 2 GB)
 - UI: Show progress messages during long operations
 
 **Verification:**
-- [ ] Code has check for extracted text > 50 MB (stderr warning)
+- [x] Code refuses extracted text > `MAX_DOCUMENT_MB` (raises `DocumentTooLargeError`)
 - [ ] EmbedIndex has `self.disabled` flag on MemoryError
-- [ ] build_pipeline() checks available memory before embedding
+- [x] build_pipeline() checks available memory before embedding
 - [ ] web_app.py shows st.info/warning during upload/processing
 
 **If Missing:** Add memory guards and progress feedback

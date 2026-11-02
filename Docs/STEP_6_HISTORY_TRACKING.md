@@ -107,8 +107,9 @@ class HistoryManager:
 **Key methods:**
 - `add_question()` — Appends new entry to session's JSON file with ISO 8601 timestamp
 - `load_session_history()` — Reads entire JSON file into memory
+- Writes go through `write_json_atomic` (temp file, then `os.replace`), so a crash cannot leave a truncated file
 - `get_recent_questions(document_name)` — Filters by document, returns sorted by timestamp (newest first)
-- `cleanup_old_sessions()` — Static method; scans `history/` folder for files with mtime > 30 days, deletes them
+- `cleanup_old_sessions()` — Static method; scans `history/` and deletes files whose newest entry is older than `retention_days` (default 30)
 
 ---
 
@@ -129,14 +130,10 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []  # In-memory cache
 ```
 
-**Cleanup on startup:**
-```python
-if not os.path.exists("history"):
-    os.makedirs("history")
-HistoryManager.cleanup_old_sessions(
-    retention_days=int(os.getenv("HISTORY_RETENTION_DAYS", "30"))
-)
-```
+**Cleanup (at most once per hour):**
+Retention cleanup for history and feedback runs in `_run_retention_cleanup_once_per_hour()` in
+`app_pages/home.py`, decorated with `@st.cache_resource(ttl=3600)`. Streamlit reruns the script on
+every interaction, so this avoids scanning the directories on each rerun.
 
 **Logging function (`app_pages/home.py`):**
 ```python

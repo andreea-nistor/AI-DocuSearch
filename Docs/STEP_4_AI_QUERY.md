@@ -56,7 +56,8 @@ payload = {
 
 The response is read from `choices[0].message.content`. Network errors, timeouts, non-success HTTP
 responses, malformed JSON, and incompatible response shapes are caught and represented as an
-explicit error result.
+explicit error result. LangSmith trace calls use `timeout_ms=(5000, 10000)` (connect, read) so a
+slow tracing endpoint cannot stall an answer.
 
 ### Optional images (multimodal requests)
 

@@ -65,7 +65,7 @@ Picture 1: A bar chart titled "Revenue by month" ...
 | `is_visual_source(path)` | `.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`. |
 | `load_validated_image(path)` | Opens a standalone image; rejects non-PNG/JPEG/WebP, animated images, and images above `MEDIA_MAX_IMAGE_PIXELS`; applies EXIF orientation. |
 | `image_to_data_url(image)` | Downscales to `VISION_MAX_IMAGE_EDGE`, re-encodes as JPEG (drops metadata), returns a base64 data URL. |
-| `describe_document_images(path, document_info)` | Renders PDF pages with `pdf2image` (up to `MEDIA_MAX_PAGES`, `VISION_RENDER_DPI`) or loads one image, calls the vision model per image, and returns a `VisualIngestResult`. **Never raises.** |
+| `describe_document_images(path, document_info)` | Renders PDF pages one at a time with `pdf2image` (up to `MEDIA_MAX_PAGES`, `VISION_RENDER_DPI`); each page is encoded and its bitmap released before the next page renders. Loads one image for image uploads. Calls the vision model per page or image and returns a `VisualIngestResult`. **Never raises.** |
 | `VisualIngestResult` | `descriptions`, `images_processed`, `images_skipped`, `pages_truncated`, `prompt_tokens`, `completion_tokens`, `elapsed_seconds`, `fallback_reason`. |
 
 Pages with no meaningful picture are skipped when the model replies `NO_MEANINGFUL_PICTURE`.

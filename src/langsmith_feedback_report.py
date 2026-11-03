@@ -2,9 +2,9 @@
 """Export and summarize LangSmith runs associated with user feedback.
 
 Examples:
-    python langsmith_feedback_report.py --project ai-docusearch
-    python langsmith_feedback_report.py --project ai-docusearch --score 0 --format csv
-    python langsmith_feedback_report.py --project another-project --include-content
+    python -m src.langsmith_feedback_report --project ai-docusearch
+    python -m src.langsmith_feedback_report --project ai-docusearch --score 0 --format csv
+    python -m src.langsmith_feedback_report --project another-project --include-content
 """
 
 import argparse
@@ -282,10 +282,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Export and summarize LangSmith runs linked to feedback.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python langsmith_feedback_report.py --project ai-docusearch
-  python langsmith_feedback_report.py --project ai-docusearch --score 0 --format csv
-  python langsmith_feedback_report.py --project support-bot --score any --since 2026-08-01
-  python langsmith_feedback_report.py --project ai-docusearch --include-content --include-child-runs
+  python -m src.langsmith_feedback_report --project ai-docusearch
+  python -m src.langsmith_feedback_report --project ai-docusearch --score 0 --format csv
+  python -m src.langsmith_feedback_report --project support-bot --score any --since 2026-08-01
+  python -m src.langsmith_feedback_report --project ai-docusearch --include-content --include-child-runs
 """,
     )
     parser.add_argument(

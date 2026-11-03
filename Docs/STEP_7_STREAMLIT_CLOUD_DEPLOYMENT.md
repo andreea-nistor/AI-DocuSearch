@@ -1,309 +1,120 @@
-# AI DocuSearch — Step 7: Streamlit Cloud Deployment
+# Step 7: Streamlit Cloud Deployment
 
-## Overview
+This document describes how the application is packaged and run on Streamlit Community Cloud, and how the code in the repository implements the deployment-specific behaviour: secrets bridging, startup order, memory and size guards, temporary upload handling, and the optional LangSmith tracing.
 
-This guide covers deploying AI DocuSearch to [Streamlit Cloud](https://streamlit.io/cloud) for browser-based access. The app works on desktop, tablet, and mobile browsers, with automatic optimization for each device type.
+## Goal
 
-## Prerequisites
+Run AI DocuSearch as a public Streamlit web app without committing credentials, while keeping the same code path that runs locally. The repository needs only a small set of deployment files, and the app adapts at runtime to the memory and OCR resources available on the host.
 
-- GitHub repository with AI DocuSearch code pushed
-- Streamlit Cloud account (free tier available)
-- API keys for:
-  - LLM provider (OpenAI, Grok, Groq, etc.) — via `OPENAI_API_KEY` or `LLM_API_KEY`
-  - LangSmith (optional) — via `LANGSMITH_API_KEY`
+## Design Decisions
 
-## Step 1: Prepare Repository for Deployment
+| Concern | Decision | Where it lives |
+|---|---|---|
+| Entry point | `web_app.py` is the Streamlit main file and builds navigation with `st.navigation` | [web_app.py](../web_app.py) |
+| Python dependencies | Pinned by name in `requirements.txt` (unpinned versions) | [requirements.txt](../requirements.txt) |
+| OS-level OCR dependencies | apt packages listed in `packages.txt` (tesseract, poppler) | [packages.txt](../packages.txt) |
+| Secrets | Entered in the Streamlit Cloud UI; copied into `os.environ` at startup | [app_pages/home.py](../app_pages/home.py) |
+| Local configuration | `.env` loaded with `python-dotenv`; `.env` and `.streamlit/` are git-ignored | [.env.example](../.env.example), [.gitignore](../.gitignore) |
+| Memory safety | Document size cap and available-memory check before embedding | [src/pipeline.py](../src/pipeline.py) |
+| Uploads | Written to a temp directory and deleted after use; stale files swept at startup | [src/upload_storage.py](../src/upload_storage.py) |
 
-Ensure your GitHub repository contains:
+## Implementation Flow
 
-### Required Files
+1. **Navigation entry.** `web_app.py` registers the home page as the default page. The privacy policy, terms of service, and third-party services pages are registered as hidden pages, so they are reachable through links but not listed in the sidebar.
 
-1. **requirements.txt** — Python dependencies
-   ```
-   pypdf
-   python-docx
-   sentence-transformers
-   faiss-cpu
-   numpy
-   requests
-   streamlit
-   python-dotenv
-   langsmith
-   pdf2image
-   pytesseract
-   pillow
-   ```
+2. **Secrets bridging.** `app_pages/home.py` sets the BLAS thread-limit environment variables first, then loads `.env` (for local runs) and copies every key in `st.secrets` into `os.environ`. Values are converted to strings. This runs inside a `st.cache_resource` function, so it executes once per server process. All later code reads configuration through `os.getenv`, which keeps local and cloud behaviour identical.
 
-2. **packages.txt** — System dependencies for OCR support
-   ```
-   tesseract-ocr
-   poppler-utils
-   libtesseract-dev
-   ```
+3. **LangSmith initialization.** Tracing is set up before the provider modules are imported. If `LANGSMITH_TRACING` is not set, it defaults to `false`. Tracing failures never block the app.
 
-3. **.env.example** — Template for environment variables (NO actual keys!)
-   ```env
-   OPENAI_API_KEY=sk-...
-   LLM_API_BASE=https://api.openai.com/v1
-   LLM_MODEL=gpt-4
-   LANGSMITH_API_KEY=lsv2_pt_...
-   LANGSMITH_TRACING=true
-   LANGSMITH_PROJECT=ai-docusearch
-   ```
+4. **Session setup.** Each browser session gets a random UUID hex identifier. History, feedback, and the cost tracker use this identifier. Old upload temp files are removed with `cleanup_stale_uploads()`, which deletes only files in the application's own temp directory that are older than one hour. Retention cleanup for history and feedback files also runs at startup, and the cleanup is cached so it does not run on every rerun.
 
-4. **web_app.py** — Streamlit navigation entry point; the main Q&A page is `app_pages/home.py`
+5. **Start gates.** The language choice (English or Română) is shown first. The GDPR consent banner comes next. If consent is not given, the page stops with `st.stop()`. A budget gate then checks the per-session cost tracker and stops the page when the session is blocked.
 
-5. **.gitignore** — Should exclude `.env` and `__pycache__/`
+6. **Upload.** The uploader accepts PDF, DOCX, and TXT files. PNG, JPEG, and WebP images are accepted only when `MULTIMODAL_ENABLED=true`. The file is written with `temporary_upload()`, which always removes it in a `finally` block. Extraction and pipeline building run on that path.
 
-### Important
+7. **Pipeline build and guards.** `src/pipeline.py` refuses extracted text larger than `MAX_DOCUMENT_MB` (default 50) with a `DocumentTooLargeError`. It checks available memory against `MIN_AVAILABLE_MEMORY_GB` (default 2.0). If memory is low or the embedding model cannot be used, the pipeline returns an index of `None`, and the app answers with keyword retrieval.
 
-- ✅ Commit all code to GitHub
-- ✅ DO NOT commit `.env` with real API keys
-- ❌ Never hardcode secrets in code
+8. **Question answering (Hybrid mode).** Each question calls `run_hybrid()`. It tries RAG first. It falls back to Direct LLM when the pipeline is missing, the RAG answer is inconclusive (English or Romanian patterns), or RAG raises an exception. Requests for specific pages can be answered from the page-matched chunks.
 
-## Step 2: Deploy to Streamlit Cloud
+9. **Response handling.** Only results with `response_status="success"` are charged to the session budget, written to history, and offered for feedback. A `simulated` result (no API configuration) is shown with a warning and is not charged or stored. Any other status shows a provider error message.
 
-### 2.1: Go to Streamlit Cloud
+10. **Rendering.** `render_chat_history()` draws the conversation as HTML-escaped chat bubbles with feedback controls. A footer with the GDPR links is rendered on every page. The per-answer metrics helper and the aggregate metrics helper exist in `app_pages/home.py`, but the live chat flow does not call them, so the app does not show a metrics panel.
 
-1. Visit [share.streamlit.io](https://share.streamlit.io)
-2. Click "New app"
+## Configuration
 
-### 2.2: Configure App
+Set these in the Streamlit Cloud Secrets editor (as `KEY = "value"` lines) or in a local `.env` file. The table lists the variables read by the code, with defaults from the code when unset.
 
-1. **Repository:** Select your GitHub repo containing AI DocuSearch
-2. **Branch:** Select `main` (or your working branch)
-3. **Main file path:** Enter `web_app.py`
-4. Click **"Deploy"**
+| Variable | Default | Purpose |
+|---|---|---|
+| `LLM_API_KEY` | none | API key for the OpenAI-compatible provider. Fallbacks: `OPENAI_API_KEY`, `XAI_API_KEY`, `GROK_API_KEY` |
+| `LLM_API_BASE` | none | Chat completions base URL. Fallbacks: `OPENAI_API_BASE`, `XAI_API_BASE`, `GROK_API_BASE`. If only `OPENAI_API_KEY` is set, `https://api.openai.com/v1` is used |
+| `LLM_MODEL` | none | Model name. Fallbacks: `OPENAI_MODEL`, `XAI_MODEL`, `GROK_MODEL` |
+| `LLM_TEMPERATURE` | `0.2` | Sampling temperature. A `# temperature:` line in a prompt file takes precedence |
+| `LANGSMITH_TRACING` | `false` | Enables LangSmith tracing when set to `true` |
+| `LANGSMITH_API_KEY` | none | LangSmith API key |
+| `LANGSMITH_PROJECT` | `default` in code, `ai-docusearch` in `.env.example` | LangSmith project name |
+| `LANGSMITH_FEEDBACK_ENABLED` | `true` | Sends Helpful / Not helpful ratings to LangSmith |
+| `HISTORY_ENABLED` | `true` | Enables per-session question history |
+| `HISTORY_RETENTION_DAYS` | `30` | Age limit for history files |
+| `HISTORY_LIMIT` | `10` | Number of history entries kept per session |
+| `FEEDBACK_RETENTION_DAYS` | `90` | Age limit for feedback files |
+| `MAX_DOCUMENT_MB` | `50` | Maximum size of extracted text before chunking |
+| `MIN_AVAILABLE_MEMORY_GB` | `2.0` | Below this available memory, keyword retrieval is used |
+| `DOCUSEARCH_LITE_MODE` | `true` | Default retrieval mode for callers that omit `use_embeddings` (for example, the CLI). The web app passes `use_embeddings=True` explicitly |
+| `MULTIMODAL_ENABLED` | `false` | Enables picture interpretation and image uploads |
+| `VISION_MODEL` | falls back to `LLM_MODEL` | Vision-capable model on the same API base |
+| `MEDIA_MAX_PAGES` | `25` | Maximum PDF pages sent for picture interpretation |
+| `MEDIA_MAX_IMAGE_PIXELS` | `20000000` | Pixel limit for images sent to the vision model |
+| `VISION_RENDER_DPI` | `110` | Render resolution for PDF pages sent to the vision model |
+| `VISION_MAX_IMAGE_EDGE` | `1568` | Longest edge, in pixels, for images sent to the vision model |
+| `TESSERACT_CMD` | system `PATH` | Tesseract executable path (local Windows use) |
+| `POPPLER_PATH` | system `PATH` | Poppler `bin` directory (local Windows use) |
 
-**Status:** The app will build and deploy (this may take 2-5 minutes for first deployment)
+On Streamlit Cloud, Tesseract and Poppler are installed from `packages.txt`, so `TESSERACT_CMD` and `POPPLER_PATH` are not needed there.
 
-## Step 3: Configure Secrets
+## Deployment Procedure
 
-### 3.1: Access Settings
+1. Push the repository to GitHub. Confirm that `.env` and `.streamlit/` are not committed.
+2. In Streamlit Community Cloud, create an app from the repository and set the main file path to `web_app.py`.
+3. Add the secrets listed above in the app's Secrets settings. At minimum, set `LLM_API_KEY`, `LLM_API_BASE`, and `LLM_MODEL`.
+4. Deploy. Cloud installs `requirements.txt` and the apt packages in `packages.txt`.
+5. Open the app, select a language, accept the consent notice, upload a small file, and ask a question. A successful answer confirms the provider configuration. A `[SIMULATED ANSWER]` warning means the API settings were not found.
 
-1. Once the app loads, click **≡** (hamburger menu) in top right
-2. Click **Settings**
-3. Click **"Secrets"** tab
+## Error Handling and Fallbacks
 
-### 3.2: Add API Keys
+- **Missing provider configuration** returns a simulated answer that is labelled as such and is not charged or saved.
+- **Provider failure** shows an error message and the answer is neither charged nor saved.
+- **Document too large** (text over `MAX_DOCUMENT_MB`) is refused before chunking, and the user sees an error.
+- **Low memory or unavailable embedding model** switches retrieval to keyword search.
+- **Scanned PDFs** without a text layer go through OCR. If OCR is unavailable, a warning is shown.
+- **Session budget** is $0.50 per session. The UI warns at 80% and blocks further questions at 100%. Costs are estimated from fixed per-token assumptions in `src/cost_tracker.py`.
+- **Unexpected exceptions** in the question flow are shown in the UI with the exception type and a short troubleshooting hint, and are printed to the server logs.
 
-Paste your secrets in the text box (one per line, format: `KEY = "value"`):
+## Tests
 
-```toml
-# Required: LLM API key (choose one)
-OPENAI_API_KEY = "sk-proj-..."
-# OR for xAI/Grok:
-# LLM_API_KEY = "grok-api-key-here"
-# LLM_API_BASE = "https://api.x.ai/v1"
-# LLM_MODEL = "grok-4"
+Run these from the repository root:
 
-# Optional: LangSmith tracing (for observability)
-LANGSMITH_API_KEY = "lsv2_pt_..."
-LANGSMITH_TRACING = "true"
-LANGSMITH_PROJECT = "ai-docusearch"
+- `python -m test_src.test_legal_pages` uses Streamlit's `AppTest` to check the language gate and the legal page navigation. It does not need network access.
+- `python -m test_src.test_langsmith` checks LangSmith configuration and sends one traced test call. It is a script, not a pytest test, and needs LangSmith credentials and network access.
+- `python -m test_src.test_ingest` covers text, DOCX, and PDF extraction, including page markers.
+- `python -m test_src.test_history` covers history isolation between sessions.
 
-# Optional: Question history tracking (Step 6)
-HISTORY_ENABLED = "true"
-HISTORY_RETENTION_DAYS = "30"
-HISTORY_LIMIT = "10"
-FEEDBACK_RETENTION_DAYS = "90"
-
-# Optional: resource limits
-MAX_DOCUMENT_MB = "50"
-MIN_AVAILABLE_MEMORY_GB = "2.0"
-
-# Optional: picture interpretation (Step 12, disabled by default)
-MULTIMODAL_ENABLED = "false"
-VISION_MODEL = "gpt-4o-mini"
-MEDIA_MAX_PAGES = "25"
-```
-
-### 3.3: Save & Rerun
-
-1. Click **"Save"**
-2. App will automatically rerun with new secrets
-3. You should see the app reload in the browser
-
-## Step 4: Verify Deployment
-
-### 4.1: Test Upload & Query
-
-1. **Upload a document**
-   - Click "Upload a PDF, DOCX or TXT file"
-   - Select a test document
-   - Wait for extraction (green ✅ message)
-
-2. **Chat with the document**
-   - The app uses **Hybrid Mode** automatically: it attempts semantic retrieval, uses keyword
-     retrieval when the embedding index is unavailable, and can fall back to Direct LLM when the
-     pipeline is unavailable or the RAG answer is inconclusive
-   - Type your question in the chat input box
-   - Press Enter or click the input box to submit
-   - Answer appears in the conversation thread below
-   - Works seamlessly on desktop, tablet, and mobile devices
-
-3. **View conversation history**
-   - Previous questions and answers appear in the chat area
-   - History persists for the current browser session
-
-### 4.2: Test LangSmith Integration (Optional)
-
-Run `test_langsmith.py` locally to verify credentials:
-
-```bash
-python test_langsmith.py
-```
-
-Then in the deployed app, ask a question. Check your [LangSmith dashboard](https://smith.langchain.com) for traces.
-
-## Step 5: Features & Capabilities
-
-### Document Formats
-
-| Format | Speed | Quality | Notes |
-|--------|-------|---------|-------|
-| Searchable PDF | Fast ✓ | High | Standard digital PDFs |
-| Scanned PDF | Slow (30-60s) | Medium | Uses OCR; works with Romanian text |
-| DOCX | Fast ✓ | High | Includes tables |
-| TXT | Very fast ✓ | High | Plain text files |
-| PNG / JPEG / WebP | Adds one vision call | Depends on `VISION_MODEL` | Only accepted when `MULTIMODAL_ENABLED=true` |
-
-### Device Support
-
-- **Desktop browsers** (Chrome, Firefox, Safari, Edge)
-  - ✅ Single Hybrid chat workflow
-  - ✅ Conversation history with timestamps
-  - ✅ Wide layout for readability
-
-- **Mobile browsers** (Android, iOS)
-  - ✅ Same chat interface as desktop
-  - ✅ Same automatic Hybrid execution path
-  - ✅ Touch-friendly chat input
-  - ✅ Responsive vertical layout
-
-### Performance Notes
-
-- **First app load:** 10-30 seconds (Streamlit Cloud cold start)
-- **Document extraction:**
-  - Searchable PDF: 1-5 seconds
-  - Scanned PDF: 30-120 seconds
-  - DOCX: 1-3 seconds
-- **Query generation:**
-  - Direct LLM: 10-30 seconds
-  - RAG mode: 30-60 seconds (includes embedding)
-  - Hybrid: depends on which mode succeeds
-
-## Step 6: Troubleshooting
-
-### App Won't Start
-
-**Symptom:** "App is loading..." but never finishes
-
-**Solutions:**
-1. Check Streamlit Cloud logs (click **≡** → **Manage app** → view **Logs**)
-2. Look for Python errors or missing packages
-3. Verify `requirements.txt` has all dependencies
-4. Try deploying a fresh branch
-
-### Document Upload Fails
-
-**Symptom:** "Failed to extract text" error
-
-**Solutions:**
-1. Verify file format (PDF, DOCX, TXT only)
-2. Check file isn't corrupted (try local test: `python demo.py document.pdf "test question"`)
-3. For scanned PDFs, verify `packages.txt` has Tesseract/Poppler
-4. Check Streamlit Cloud logs for specific error
-
-### Button Click Does Nothing
-
-**Symptom:** Submit a question but no response appears
-
-**Solutions:**
-1. Verify `OPENAI_API_KEY` is set in Secrets
-2. Check API key is valid (test locally first)
-3. Check Streamlit Cloud logs for errors
-4. Try smaller test document first
-5. Verify internet connectivity
-
-### LangSmith Traces Not Appearing
-
-**Symptom:** App works but no traces in LangSmith dashboard
-
-**Solutions:**
-1. Verify `LANGSMITH_API_KEY` set in Secrets (not `.env`)
-2. Verify `LANGSMITH_TRACING = "true"` in Secrets
-3. Run `test_langsmith.py` locally to verify credentials
-4. Check LangSmith dashboard at https://smith.langchain.com
-5. Ensure project name matches `LANGSMITH_PROJECT`
-
-## Step 7: Customization
-
-### Change App Description
-
-Edit the title/description section in `app_pages/home.py`:
-
-```python
-st.markdown(
-    "Your custom description here"
-)
-```
-
-Push to GitHub; app will redeploy automatically.
-
-### Adjust LLM Temperature
-
-Edit `prompts/direct_llm_prompt.txt` or `prompts/rag_prompt.txt`:
-
-```
-# temperature: 0.5
-```
-
-Change value to 0.1-1.0; push to GitHub.
-
-### Session Metrics Panel
-
-`render_chat_history()` in `app_pages/home.py` always displays an aggregate **📊 Session Metrics**
-panel (total queries, total/average response time, token counts) below the conversation for the
-current document; there is no toggle to show or hide it. A separate per-answer metrics toggle
-(`render_result()`/`render_metrics()`, using `show_metrics_{mode_key}` in `st.session_state`) exists
-in the module but is not currently called from the live chat flow.
-
-```python
-if show_flag not in st.session_state:
-    st.session_state[show_flag] = True  # Change to True to show by default
-```
-
-## Step 8: Monitor & Maintain
-
-### Regular Checks
-
-- Monitor API usage in provider dashboard (OpenAI, Grok, etc.)
-- Check Streamlit Cloud logs monthly for errors
-- Verify LangSmith traces if enabled
-
-### Updates
-
-1. Make changes locally
-2. Commit and push to GitHub
-3. Streamlit Cloud auto-redeploys (usually within 1 minute)
-
-### Rerun App Manually
-
-Go to **≡** → **Manage app** → click **Rerun** if needed
-
-## Next Steps
-
-- Share your app URL with users
-- Collect feedback on document formats and languages
-- Monitor costs with your LLM provider
-- Consider Streamlit Cloud Pro tier if high usage
-
----
-
-## Additional Resources
-
-- [Streamlit Cloud Docs](https://docs.streamlit.io/streamlit-cloud)
-- [LangSmith Dashboard](https://smith.langchain.com)
-- [OpenAI API Documentation](https://platform.openai.com/docs)
-- [Tesseract OCR Documentation](https://github.com/UB-Mannheim/tesseract/wiki)
+## Limitations
+
+- Streamlit Community Cloud's file system is ephemeral. Files in `history/` and `feedback/` are lost when the app restarts or is redeployed.
+- Session history and the cost budget are tied to a browser session. Refreshing the page starts a new session and a new budget.
+- The cost budget is enforced in the UI only. It is an estimate, not billing data.
+- Mobile detection reads a `_user_agent` query parameter or the `HTTP_USER_AGENT` environment variable. Standard Streamlit does not set either by default, so the mobile layout is not reliably applied. This was not tested in a browser.
+- Memory limits on the Cloud host are not configurable from the app. `MAX_DOCUMENT_MB` and `MIN_AVAILABLE_MEMORY_GB` are the app's only controls.
+- Romanian OCR accuracy depends on the Tesseract language data installed by `packages.txt`. The file does not list a Romanian language pack, so this was not verified.
+
+## Related
+
+- [STEP_4_AI_QUERY.md](STEP_4_AI_QUERY.md) describes the provider call and configuration precedence.
+- [STEP_5_PIPELINE.md](STEP_5_PIPELINE.md) describes the RAG and Direct LLM pipeline used by Hybrid mode.
+- [STEP_6_HISTORY_TRACKING.md](STEP_6_HISTORY_TRACKING.md) describes per-session history and retention.
+- [STEP_8_FEEDBACK_COLLECTION.md](STEP_8_FEEDBACK_COLLECTION.md) describes feedback capture and LangSmith feedback.
+- [STEP_9_INTERNATIONALIZATION.md](STEP_9_INTERNATIONALIZATION.md) describes the English and Romanian UI.
+- [STEP_10_COST_TRACKING.md](STEP_10_COST_TRACKING.md) describes the session budget.
+- [STEP_11_GDPR_COMPLIANCE.md](STEP_11_GDPR_COMPLIANCE.md) describes the consent banner and data export.
+- [STEP_12_PICTURE_INTERPRETATION.md](STEP_12_PICTURE_INTERPRETATION.md) describes the optional vision feature.

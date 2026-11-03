@@ -3,7 +3,7 @@ Cost tracking module for LLM usage.
 
 Tracks cumulative LLM costs per session and enforces a $0.50 USD budget limit using fixed
 pricing assumptions. These rates are not read from the configured LLM_MODEL/provider; they are a
-placeholder estimate (see TERMS_OF_SERVICE.md) until per-provider pricing is implemented.
+placeholder estimate (see Policies/TERMS_OF_SERVICE.md) until per-provider pricing is implemented.
 
 Assumed pricing:
 - Input: $0.03 per 1K tokens

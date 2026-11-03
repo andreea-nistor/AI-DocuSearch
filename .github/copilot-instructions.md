@@ -20,33 +20,31 @@ python -m streamlit run web_app.py
 Run the CLI flow:
 
 ```powershell
-python demo.py examples/sample.pdf "What are the contract dates?"
-# Equivalent module entry point:
 python -m src.pipeline examples/sample.pdf "What are the contract dates?"
 ```
 
 The ingestion tests use a custom script rather than a test runner:
 
 ```powershell
-python test_ingest.py
+python -m test_src.test_ingest
 ```
 
 Picture-interpretation tests (mocked vision provider, no network):
 
 ```powershell
-python test_visual_ingest.py
+python -m test_src.test_visual_ingest
 ```
 
 Run one ingestion test by importing its function:
 
 ```powershell
-python -c "from test_ingest import test_extract_text_docx_support; test_extract_text_docx_support()"
+python -c "from test_src.test_ingest import test_extract_text_docx_support; test_extract_text_docx_support()"
 ```
 
 Check optional LangSmith credentials and trace delivery with:
 
 ```powershell
-python test_langsmith.py
+python -m test_src.test_langsmith
 ```
 
 ## Architecture
@@ -73,8 +71,8 @@ python test_langsmith.py
   `src/pipeline.py` detects explicit multilingual page requests and selects matching page chunks
   before embedding or keyword retrieval. Page ranges are limited to five physical PDF pages and
   page context to 30,000 characters.
-- `src/i18n.py` provides automatic language detection (from browser Accept-Language header or IP geolocation),
-  translation of all UI strings, and language-aware LLM prompts. Supports English, Romanian, French, Spanish, German.
+- `src/i18n.py` provides the start-screen language choice (English or Română, shown before the consent
+  notice), translation of all UI strings, and language-aware LLM prompts. Supports English and Romanian only.
   Language preference is cached in `st.session_state`; `set_language()` supports a manual override, but the
   current Home page does not render the optional language-selector helper (see below).
 - `src/embed_index.py` lazily loads `all-MiniLM-L6-v2`, prefers FAISS cosine search, falls back to
@@ -119,7 +117,7 @@ python test_langsmith.py
   Streamlit or modules that can load NumPy/model code; they protect low-memory deployments.
 - Streamlit reruns are coordinated through `st.session_state`: a new upload or changed question
   clears prior mode results, while metric visibility, language preference, and comparison state persist across reruns.
-- Language detection is cached in `st.session_state.user_language` and persists across reruns. The
+- The chosen language is stored in `st.session_state.user_language` (with `user_language_chosen`) and persists across reruns. The
   current Home page does not render the optional language-selector helper.
 - Each new Streamlit session receives a random UUID hex identifier. History and feedback managers
   must use that identifier rather than process identity or a hash of the session-state proxy.

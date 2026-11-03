@@ -5,9 +5,9 @@ Feedback Export and Analytics Tool
 Export all user feedback for analysis and generate summary statistics.
 
 Usage:
-    python export_feedback.py                    # Export and show stats
-    python -c "from export_feedback import print_feedback_stats; print_feedback_stats()"
-    python -c "from export_feedback import export_all_feedback; export_all_feedback('report.json')"
+    python -m src.export_feedback                    # Export and show stats
+    python -c "from src.export_feedback import print_feedback_stats; print_feedback_stats()"
+    python -c "from src.export_feedback import export_all_feedback; export_all_feedback('report.json')"
 """
 
 import json

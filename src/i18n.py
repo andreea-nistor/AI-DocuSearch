@@ -1,14 +1,22 @@
 """
-Internationalization (i18n) module for AI DocuSearch.
-Detects user language from browser Accept-Language header or IP geolocation,
-and provides translation utilities.
+Internationalization (i18n) for AI DocuSearch.
+
+Supported languages: English (en, default) and Romanian (ro). The user picks the language on the
+start screen (show_language_selector) before the consent notice. Provides translate() and a helper
+for the legal Markdown documents.
 """
 
-import os
-from typing import Optional, Dict
+from pathlib import Path
+from typing import Optional
 import streamlit as st
 
-# Translation dictionary - add more languages/translations as needed
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+POLICIES_DIR = PROJECT_ROOT / "Policies"
+DEFAULT_LANGUAGE = "en"
+SUPPORTED_LANGUAGES = {"en": "English", "ro": "Română"}
+LANGUAGE_CHOSEN_KEY = "user_language_chosen"
+
+# Translation dictionary (English and Romanian only)
 TRANSLATIONS = {
     "en": {
         "title": "AI DocuSearch",
@@ -41,6 +49,68 @@ TRANSLATIONS = {
         "picture_descriptions_label": "picture description(s)",
         "no_text_or_pictures": "No text or picture descriptions could be extracted from this file.",
         "answer_includes_picture_description": "🖼️ This answer includes an AI-generated picture description.",
+        "mobile_detected": "📱 **Mobile Device Detected**: Hybrid mode intelligently adapts to your device's capabilities. It will use fast, efficient processing optimized for mobile.",
+        "share_feedback": "Share feedback",
+        "share_feedback_help": "Open the AI DocuSearch testing feedback form in a new tab.",
+        "trial_nearly_complete": "**Free testing trial nearly complete:** You are approaching the trial limit. Only a small amount of usage remains.",
+        "trial_complete": "**Free testing trial complete:** Your free testing trial has ended. Please share your experience using the form below. Your feedback will help improve AI DocuSearch and is greatly appreciated.",
+        "metric_total_time": "Total time",
+        "metric_chunks_used": "Chunks used",
+        "metric_context_size": "Context size",
+        "metric_tokens_est": "Tokens (est.)",
+        "metric_tokens_actual": "Tokens (actual)",
+        "detailed_metrics": "Detailed timing & tokens",
+        "metric_build_time": "Build/index time",
+        "metric_retrieval_time": "Retrieval time",
+        "metric_generation_time": "Generation time",
+        "metric_temperature": "Temperature",
+        "metric_prompt_tokens": "Prompt tokens",
+        "metric_completion_tokens": "Completion tokens",
+        "metric_live_api": "Live API used",
+        "yes": "Yes",
+        "no_simulated": "No (simulated fallback)",
+        "lite_mode_note": "⚠ Ran in lite (keyword-search) mode",
+        "fallback_cause": "fallback cause",
+        "helpful_question": "👍 Was this answer helpful?",
+        "helpful_btn": "👍 Helpful",
+        "not_helpful_btn": "👎 Not helpful",
+        "feedback_thanks": "✅ Thanks for the feedback!",
+        "feedback_improve": "📝 We'll use this to improve!",
+        "answer_heading": "Answer",
+        "hide_metrics": "📊 Hide metrics",
+        "show_metrics": "📊 Show metrics",
+        "avatar_user": "YOU",
+        "avatar_bot": "BOT",
+        "ocr_tip_detail": "📌 **Tip**: For best results, use PDFs with selectable text (not scanned images). If you have a scanned PDF in a non-English language, OCR may need configuration.",
+        "document_too_large": "📏 **Document too large**:",
+        "could_not_read_pdf": "📄 **Could not read this PDF**:",
+        "error_short": "❌ Error",
+        "error_label": "❌ **Error**:",
+        "troubleshooting": "**Troubleshooting:**\n- Check your API key in Streamlit secrets\n- Try with a smaller document\n- Check the Streamlit Cloud logs for details",
+        "simulated_warning": "The language model is not configured. This simulated preview was not saved to history or counted toward your usage.",
+        "provider_error": "The language model provider could not complete this request. No answer was saved and the request was not counted toward this app's usage budget.",
+        "provider_retry": "Please try again later or contact the application operator if the problem continues.",
+        "privacy_section": "### 🔒 Privacy & Data Management",
+        "download_data": "📥 Download Data",
+        "download_help": "Export your data (GDPR right to portability)",
+        "save_json": "💾 Save JSON",
+        "data_ready": "✅ Your data is ready!",
+        "delete_data": "🗑️ Delete Data",
+        "delete_help": "Delete all your data (GDPR right to erasure)",
+        "delete_warning": "⚠️ This will permanently delete ALL your data!",
+        "delete_confirm": "I understand - delete everything",
+        "all_deleted": "✅ All data deleted!",
+        "delete_error": "❌ Error deleting data",
+        "gdpr_rights": "**Your GDPR Rights:**\n- ✅ Access your data (📥 Download)\n- ✅ Delete your data (🗑️ Delete)\n- ✅ Data portability (JSON format)\n- ✅ Restrict processing\n- ✅ Object to tracking",
+        "nav_home": "Home",
+        "nav_privacy": "Privacy Policy",
+        "nav_terms": "Terms of Service",
+        "nav_third_party": "Third-Party Services",
+        "consent_title": "🔒 **Privacy & Data Processing Notice**",
+        "consent_body": "By using AI DocuSearch, you consent to:\n- **Processing your documents** with AI models (text excerpts, and page images when picture interpretation is enabled, are sent to the configured LLM provider)\n- **Storing chat history** for 30 days and feedback for 90 days (auto-deleted after)\n- **Analytics & debugging** via LangSmith for performance monitoring",
+        "consent_rights": "✅ **Your rights:**\n- 📥 Download your data anytime\n- 🗑️ Delete your data anytime\n- ⏰ Auto-deletion after 30 days (history) / 90 days (feedback)",
+        "consent_agree": "✅ I Agree & Continue",
+        "consent_required": "⚠️ You must consent to use this service",
     },
     "ro": {
         "title": "AI DocuSearch",
@@ -73,306 +143,148 @@ TRANSLATIONS = {
         "picture_descriptions_label": "descriere(i) de imagine",
         "no_text_or_pictures": "Nu s-a putut extrage text sau descrieri de imagini din acest fișier.",
         "answer_includes_picture_description": "🖼️ Acest răspuns include o descriere de imagine generată de AI.",
-    },
-    "fr": {
-        "title": "AI DocuSearch",
-        "description": "Votre moteur de recherche IA personnel pour les documents.\nTéléchargez un PDF et trouvez instantanément les réponses cachées à l'intérieur — clauses, définitions, résumés, explications.",
-        "budget_info": "Essayez gratuitement: vous pouvez poser ~25 questions sur un document d'environ 100 pages. Les documents plus volumineux supporteront moins de questions.",
-        "upload_prompt": "Télécharger un fichier PDF, DOCX ou TXT",
-        "file_saved": "📁 Fichier enregistré",
-        "extracting": "⏳ Extraction du texte du document...",
-        "extracted": "✅ Extrait",
-        "chars": "caractères",
-        "mb": "MB",
-        "pages": "pages",
-        "in": "en",
-        "seconds": "s",
-        "ask_question": "Posez une question sur le document...",
-        "processing": "⏳ Traitement de votre question...",
-        "completed": "✅",
-        "document_info": "Informations du document",
-        "positive": "Positif",
-        "negative": "Négatif",
-        "upload_first": "👆 Veuillez d'abord télécharger un document",
-        "failed_save": "❌ Échec de la sauvegarde du fichier",
-        "failed_extract": "❌ Échec de l'extraction du texte",
-        "ocr_note": "⚠️ **Remarque sur les PDF numérisés**",
-        "ocr_tip": "📌 **Conseil**: Pour de meilleurs résultats, utilisez des PDF avec du texte sélectionnable",
-        "upload_prompt_multimodal": "Téléchargez un fichier PDF, DOCX, TXT, PNG, JPEG ou WebP",
-        "interpreting_pictures": "🖼️ Interprétation des images avec le modèle de vision...",
-        "picture_interpretation_incomplete": "🖼️ L'interprétation des images était incomplète",
-        "picture_pages_truncated": "🖼️ Seules les {count} premières pages ont été interprétées pour les images (MEDIA_MAX_PAGES).",
-        "picture_descriptions_label": "description(s) d'image",
-        "no_text_or_pictures": "Aucun texte ni description d'image n'a pu être extrait de ce fichier.",
-        "answer_includes_picture_description": "🖼️ Cette réponse inclut une description d'image générée par IA.",
-    },
-    "es": {
-        "title": "AI DocuSearch",
-        "description": "Tu motor de búsqueda IA personal para documentos.\nCarga un PDF y encuentra instantáneamente las respuestas ocultas dentro — cláusulas, definiciones, resúmenes, explicaciones.",
-        "budget_info": "Prueba gratis: puedes hacer ~25 preguntas en un documento de ~100 páginas. Los documentos más grandes soportarán menos preguntas.",
-        "upload_prompt": "Carga un archivo PDF, DOCX o TXT",
-        "file_saved": "📁 Archivo guardado",
-        "extracting": "⏳ Extrayendo texto del documento...",
-        "extracted": "✅ Extraído",
-        "chars": "caracteres",
-        "mb": "MB",
-        "pages": "páginas",
-        "in": "en",
-        "seconds": "s",
-        "ask_question": "Haz una pregunta sobre el documento...",
-        "processing": "⏳ Procesando tu pregunta...",
-        "completed": "✅",
-        "document_info": "Información del documento",
-        "positive": "Positivo",
-        "negative": "Negativo",
-        "upload_first": "👆 Por favor, carga un documento primero",
-        "failed_save": "❌ Error al guardar el archivo",
-        "failed_extract": "❌ Error al extraer el texto",
-        "ocr_note": "⚠️ **Nota sobre PDF escaneados**",
-        "ocr_tip": "📌 **Consejo**: Para mejores resultados, usa PDF con texto seleccionable",
-        "upload_prompt_multimodal": "Carga un archivo PDF, DOCX, TXT, PNG, JPEG o WebP",
-        "interpreting_pictures": "🖼️ Interpretando imágenes con el modelo de visión...",
-        "picture_interpretation_incomplete": "🖼️ La interpretación de imágenes fue incompleta",
-        "picture_pages_truncated": "🖼️ Solo se interpretaron las primeras {count} páginas para imágenes (MEDIA_MAX_PAGES).",
-        "picture_descriptions_label": "descripción(es) de imagen",
-        "no_text_or_pictures": "No se pudo extraer texto ni descripciones de imágenes de este archivo.",
-        "answer_includes_picture_description": "🖼️ Esta respuesta incluye una descripción de imagen generada por IA.",
-    },
-    "de": {
-        "title": "AI DocuSearch",
-        "description": "Deine persönliche KI-Suchmaschine für Dokumente.\nLade ein PDF hoch und finde sofort die verborgenen Antworten — Klauseln, Definitionen, Zusammenfassungen, Erklärungen.",
-        "budget_info": "Kostenlos testen: Du kannst ~25 Fragen zu einem ~100-seitigen Dokument stellen. Größere Dokumente ermöglichen weniger Fragen.",
-        "upload_prompt": "PDF-, DOCX- oder TXT-Datei hochladen",
-        "file_saved": "📁 Datei gespeichert",
-        "extracting": "⏳ Text aus Dokument wird extrahiert...",
-        "extracted": "✅ Extrahiert",
-        "chars": "Zeichen",
-        "mb": "MB",
-        "pages": "Seiten",
-        "in": "in",
-        "seconds": "s",
-        "ask_question": "Stelle eine Frage zum Dokument...",
-        "processing": "⏳ Verarbeitung deiner Frage...",
-        "completed": "✅",
-        "document_info": "Dokumentinformationen",
-        "positive": "Positiv",
-        "negative": "Negativ",
-        "upload_first": "👆 Bitte laden Sie zunächst ein Dokument hoch",
-        "failed_save": "❌ Fehler beim Speichern der Datei",
-        "failed_extract": "❌ Fehler beim Extrahieren des Textes",
-        "ocr_note": "⚠️ **Hinweis zu gescannten PDFs**",
-        "ocr_tip": "📌 **Tipp**: Verwenden Sie für beste Ergebnisse PDF mit auswählbarem Text",
-        "upload_prompt_multimodal": "PDF-, DOCX-, TXT-, PNG-, JPEG- oder WebP-Datei hochladen",
-        "interpreting_pictures": "🖼️ Bilder werden mit dem Vision-Modell interpretiert...",
-        "picture_interpretation_incomplete": "🖼️ Die Bildinterpretation war unvollständig",
-        "picture_pages_truncated": "🖼️ Nur die ersten {count} Seiten wurden auf Bilder untersucht (MEDIA_MAX_PAGES).",
-        "picture_descriptions_label": "Bildbeschreibung(en)",
-        "no_text_or_pictures": "Aus dieser Datei konnten weder Text noch Bildbeschreibungen extrahiert werden.",
-        "answer_includes_picture_description": "🖼️ Diese Antwort enthält eine KI-generierte Bildbeschreibung.",
+        "mobile_detected": "📱 **Dispozitiv mobil detectat**: Modul hibrid se adaptează automat la capacitățile dispozitivului tău. Folosește o procesare rapidă și eficientă, optimizată pentru mobil.",
+        "share_feedback": "Trimite feedback",
+        "share_feedback_help": "Deschide formularul de feedback pentru testarea AI DocuSearch într-un tab nou.",
+        "trial_nearly_complete": "**Perioada de testare gratuită aproape s-a încheiat:** Te apropii de limita de utilizare. Mai rămâne doar o cantitate mică.",
+        "trial_complete": "**Perioada de testare gratuită s-a încheiat:** Perioada ta de testare gratuită a expirat. Te rugăm să îți împărtășești experiența folosind formularul de mai jos. Feedback-ul tău ajută la îmbunătățirea AI DocuSearch și este foarte apreciat.",
+        "metric_total_time": "Timp total",
+        "metric_chunks_used": "Fragmente utilizate",
+        "metric_context_size": "Dimensiune context",
+        "metric_tokens_est": "Tokeni (est.)",
+        "metric_tokens_actual": "Tokeni (reali)",
+        "detailed_metrics": "Timp și tokeni detaliat",
+        "metric_build_time": "Timp de construire/indexare",
+        "metric_retrieval_time": "Timp de căutare",
+        "metric_generation_time": "Timp de generare",
+        "metric_temperature": "Temperatură",
+        "metric_prompt_tokens": "Tokeni de prompt",
+        "metric_completion_tokens": "Tokeni de răspuns",
+        "metric_live_api": "API live utilizat",
+        "yes": "Da",
+        "no_simulated": "Nu (răspuns simulat de rezervă)",
+        "lite_mode_note": "⚠ Rulat în modul lite (căutare după cuvinte cheie)",
+        "fallback_cause": "cauza rezervei",
+        "helpful_question": "👍 Ți-a fost util acest răspuns?",
+        "helpful_btn": "👍 Util",
+        "not_helpful_btn": "👎 Nu a fost util",
+        "feedback_thanks": "✅ Mulțumim pentru feedback!",
+        "feedback_improve": "📝 Vom folosi acest lucru pentru a ne îmbunătăți!",
+        "answer_heading": "Răspuns",
+        "hide_metrics": "📊 Ascunde metricile",
+        "show_metrics": "📊 Afișează metricile",
+        "avatar_user": "TU",
+        "avatar_bot": "BOT",
+        "ocr_tip_detail": "📌 **Sfat**: Pentru rezultate optime, folosește PDF-uri cu text selectabil (nu imagini scanate). Dacă ai un PDF scanat într-o limbă non-engleză, OCR poate necesita configurare.",
+        "document_too_large": "📏 **Document prea mare**:",
+        "could_not_read_pdf": "📄 **Nu s-a putut citi acest PDF**:",
+        "error_short": "❌ Eroare",
+        "error_label": "❌ **Eroare**:",
+        "troubleshooting": "**Depanare:**\n- Verifică cheia API în secretele Streamlit\n- Încearcă cu un document mai mic\n- Verifică jurnalele Streamlit Cloud pentru detalii",
+        "simulated_warning": "Modelul de limbaj nu este configurat. Această previzualizare simulată nu a fost salvată în istoric și nu a fost contorizată în utilizarea ta.",
+        "provider_error": "Furnizorul modelului de limbaj nu a putut finaliza această cerere. Niciun răspuns nu a fost salvat, iar cererea nu a fost contorizată în bugetul de utilizare al aplicației.",
+        "provider_retry": "Te rugăm să încerci din nou mai târziu sau să contactezi operatorul aplicației dacă problema persistă.",
+        "privacy_section": "### 🔒 Confidențialitate și gestionarea datelor",
+        "download_data": "📥 Descarcă datele",
+        "download_help": "Exportă datele tale (dreptul la portabilitate, GDPR)",
+        "save_json": "💾 Salvează JSON",
+        "data_ready": "✅ Datele tale sunt pregătite!",
+        "delete_data": "🗑️ Șterge datele",
+        "delete_help": "Șterge toate datele tale (dreptul la ștergere, GDPR)",
+        "delete_warning": "⚠️ Aceasta va șterge definitiv TOATE datele tale!",
+        "delete_confirm": "Am înțeles - șterge tot",
+        "all_deleted": "✅ Toate datele au fost șterse!",
+        "delete_error": "❌ Eroare la ștergerea datelor",
+        "gdpr_rights": "**Drepturile tale GDPR:**\n- ✅ Acces la datele tale (📥 Descărcare)\n- ✅ Ștergerea datelor tale (🗑️ Ștergere)\n- ✅ Portabilitatea datelor (format JSON)\n- ✅ Restricționarea prelucrării\n- ✅ Opoziție la urmărire",
+        "nav_home": "Acasă",
+        "nav_privacy": "Politica de confidențialitate",
+        "nav_terms": "Termeni și condiții",
+        "nav_third_party": "Servicii terțe",
+        "consent_title": "🔒 **Notificare privind confidențialitatea și prelucrarea datelor**",
+        "consent_body": "Prin utilizarea AI DocuSearch, îți dai consimțământul pentru:\n- **Prelucrarea documentelor tale** cu modele AI (fragmente de text și, dacă interpretarea imaginilor este activată, imagini ale paginilor sunt trimise furnizorului LLM configurat)\n- **Stocarea istoricului conversațiilor** timp de 30 de zile și a feedback-ului timp de 90 de zile (șterse automat ulterior)\n- **Analize și depanare** prin LangSmith, pentru monitorizarea performanței",
+        "consent_rights": "✅ **Drepturile tale:**\n- 📥 Descarcă-ți datele oricând\n- 🗑️ Șterge-ți datele oricând\n- ⏰ Ștergere automată după 30 de zile (istoric) / 90 de zile (feedback)",
+        "consent_agree": "✅ Sunt de acord și continui",
+        "consent_required": "⚠️ Trebuie să îți dai consimțământul pentru a folosi serviciul",
     },
 }
 
 
-def detect_language_from_header() -> Optional[str]:
-    """Detect language from browser Accept-Language header.
-    
-    On Streamlit Cloud, this is the only reliable way to detect user language
-    since IP geolocation sees Streamlit's server IP, not the user's actual location.
-    """
-    try:
-        # Method 1: Streamlit >= 1.37 exposes request headers via st.context
-        try:
-            import streamlit as st
-
-            accept_lang = st.context.headers.get("Accept-Language", "")
-            if accept_lang:
-                print(f"[i18n] Found Accept-Language header: {accept_lang}", flush=True)
-                # Parse: en-US,en;q=0.9,fr;q=0.8,de;q=0.7
-                langs = [lang.split(';')[0].split('-')[0].lower().strip() for lang in accept_lang.split(',')]
-                for lang in langs:
-                    if lang in TRANSLATIONS:
-                        print(f"[i18n] Matched language from header: {lang}", flush=True)
-                        return lang
-        except Exception as e:
-            print(f"[i18n] Header method 1 failed: {type(e).__name__}", flush=True)
-        
-        # Method 2: Try environment variable (set by some cloud providers)
-        env_lang = os.getenv("HTTP_ACCEPT_LANGUAGE", "")
-        if env_lang:
-            print(f"[i18n] Found HTTP_ACCEPT_LANGUAGE env: {env_lang}", flush=True)
-            langs = [lang.split('-')[0].lower().strip() for lang in env_lang.split(',')]
-            for lang in langs:
-                if lang in TRANSLATIONS:
-                    print(f"[i18n] Matched language from env: {lang}", flush=True)
-                    return lang
-    
-    except Exception as e:
-        print(f"[i18n] Accept-Language detection error: {type(e).__name__}: {e}", flush=True)
-    
-    print("[i18n] No Accept-Language header found", flush=True)
-    return None
-
-
-def detect_language_from_ip() -> Optional[str]:
-    """
-    Detect language from user IP using geolocation API (fallback).
-    
-    NOTE: On Streamlit Cloud, this will NOT work because the app sees
-    Streamlit's server IP, not the user's actual IP. This is only useful
-    for local deployments or platforms that forward X-Forwarded-For headers.
-    """
-    try:
-        import requests
-        
-        # Check if we're on Streamlit Cloud (unlikely to get user IP)
-        is_streamlit_cloud = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true"
-        
-        if is_streamlit_cloud:
-            print("[i18n] On Streamlit Cloud - skipping IP geolocation (unreliable)", flush=True)
-            return None
-        
-        # Try HTTPS first, then HTTP
-        try:
-            response = requests.get('https://ip-api.com/json/?fields=countryCode', timeout=3)
-        except:
-            response = requests.get('http://ip-api.com/json/?fields=countryCode', timeout=3)
-        
-        if response.status_code == 200:
-            data = response.json()
-            country_code = data.get('countryCode', '').lower()
-            
-            print(f"[i18n] IP geolocation detected country: {country_code}", flush=True)
-            
-            # Map country codes to languages
-            country_to_lang = {
-                'ro': 'ro',  # Romania -> Romanian
-                'fr': 'fr',  # France -> French
-                'es': 'es',  # Spain -> Spanish
-                'de': 'de',  # Germany -> German
-                'at': 'de',  # Austria -> German
-                'ch': 'de',  # Switzerland -> German (primary)
-                'be': 'fr',  # Belgium -> French
-                'gb': 'en',  # UK -> English
-                'us': 'en',  # USA -> English
-            }
-            lang = country_to_lang.get(country_code)
-            if lang in TRANSLATIONS:
-                print(f"[i18n] IP detection mapped {country_code} to language: {lang}", flush=True)
-                return lang
-    except Exception as e:
-        print(f"[i18n] IP detection failed: {type(e).__name__}", flush=True)
-    return None
-
-
-def detect_language_from_browser() -> Optional[str]:
-    """
-    Attempt to detect browser language via Streamlit mechanisms.
-    On Streamlit Cloud, this is limited, so the Accept-Language header method is preferred.
-    """
-    # This function is kept for future use, but currently returns None
-    # as there's no reliable way to get browser language on Streamlit Cloud without sidebars
-    return None
-
-
 def get_user_language() -> str:
-    """
-    Detect user language with fallback chain:
-    1. Cached in session state
-    2. Browser Accept-Language header
-    3. Browser navigator.language (via JavaScript)
-    4. IP geolocation (local deployments only)
-    5. Default to English
-    """
-    if "user_language" not in st.session_state:
-        lang = None
-        
-        # Try Accept-Language header first (most accurate on non-Streamlit platforms)
-        lang = detect_language_from_header()
-        if lang:
-            print(f"[i18n] Detected language from Accept-Language header: {lang}", flush=True)
-        
-        # Try browser detection (Streamlit Cloud compatible)
-        if not lang:
-            lang = detect_language_from_browser()
-            if lang:
-                print(f"[i18n] Detected language from browser: {lang}", flush=True)
-        
-        # Fall back to IP geolocation (local deployments only, skipped on Streamlit Cloud)
-        if not lang:
-            lang = detect_language_from_ip()
-            if lang:
-                print(f"[i18n] Detected language from IP geolocation: {lang}", flush=True)
-        
-        # Default to English
-        if not lang:
-            lang = "en"
-            print(f"[i18n] No language detected, defaulting to: {lang}", flush=True)
-        
-        st.session_state.user_language = lang
-        print(f"[i18n] Final detected language: {lang}", flush=True)
-    
-    return st.session_state.user_language
+    """Return the language chosen on the start screen (English by default)."""
+    return st.session_state.get("user_language", DEFAULT_LANGUAGE)
+
+
+def has_chosen_language() -> bool:
+    """Return True once the user has picked a language on the start screen."""
+    return bool(st.session_state.get(LANGUAGE_CHOSEN_KEY, False))
 
 
 def translate(key: str, default: Optional[str] = None) -> str:
     """
     Get translated text for a key in the user's language.
-    
-    Args:
-        key: Translation key (e.g., "upload_prompt")
-        default: Fallback text if key not found
-    
-    Returns:
-        Translated text
+
+    Falls back to English, then to ``default`` (or the key itself).
     """
     lang = get_user_language()
     text = TRANSLATIONS.get(lang, {}).get(key, None)
-    
+
     if text is None:
-        # Fall back to English if not found in user's language
-        text = TRANSLATIONS.get("en", {}).get(key, None)
-    
+        text = TRANSLATIONS[DEFAULT_LANGUAGE].get(key, None)
+
     if text is None:
-        # Fall back to provided default or key itself
         text = default or key
-    
+
     return text
 
 
 def set_language(language_code: str) -> None:
-    """Allow user to manually override language."""
-    if language_code in TRANSLATIONS:
-        st.session_state.user_language = language_code
-    else:
+    """Store the language chosen by the user (also used as the button callback)."""
+    if language_code not in SUPPORTED_LANGUAGES:
         raise ValueError(f"Unsupported language: {language_code}")
+    st.session_state["user_language"] = language_code
+    st.session_state[LANGUAGE_CHOSEN_KEY] = True
 
 
-def get_supported_languages() -> Dict[str, str]:
-    """Get list of supported languages."""
-    return {
-        "en": "English",
-        "ro": "Română",
-        "fr": "Français",
-        "es": "Español",
-        "de": "Deutsch",
-    }
+def show_language_selector() -> bool:
+    """
+    Show the bilingual language choice (English / Română) before the consent notice.
 
+    Returns True once a language has been chosen, False while the choice is pending.
+    """
+    if has_chosen_language():
+        return True
 
-def add_language_selector_sidebar() -> None:
-    """Add language selector to Streamlit sidebar."""
-    with st.sidebar:
-        st.markdown("### 🌍 Language / Limbă")
-        current_lang = get_user_language()
-        supported = get_supported_languages()
-        
-        selected_lang = st.selectbox(
-            "Select language",
-            options=list(supported.keys()),
-            format_func=lambda x: f"{supported[x]} ({x.upper()})",
-            index=list(supported.keys()).index(current_lang),
-            key="language_selector"
+    st.title("AI DocuSearch")
+    st.markdown("### 🌍 Choose your language / Alege limba")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.button(
+            "English",
+            key="language_button_en",
+            on_click=set_language,
+            args=("en",),
+            use_container_width=True,
         )
-        
-        if selected_lang != current_lang:
-            set_language(selected_lang)
-            st.rerun()
+    with col2:
+        st.button(
+            "Română",
+            key="language_button_ro",
+            on_click=set_language,
+            args=("ro",),
+            use_container_width=True,
+        )
+    return False
+
+
+def read_legal_document(name: str) -> str:
+    """
+    Read a legal Markdown document in the user's language.
+
+    ``name`` is the file stem, e.g. ``"PRIVACY_POLICY"``. Romanian uses ``<name>.ro.md``
+    when present. English ``<name>.md`` is the binding version and the fallback.
+    """
+    if get_user_language() == "ro":
+        ro_path = POLICIES_DIR / f"{name}.ro.md"
+        if ro_path.exists():
+            return ro_path.read_text(encoding="utf-8")
+    return (POLICIES_DIR / f"{name}.md").read_text(encoding="utf-8")

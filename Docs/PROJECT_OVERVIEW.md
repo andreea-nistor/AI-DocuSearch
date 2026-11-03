@@ -24,8 +24,8 @@ AI DocuSearch isn't just "chat with your PDF." It's a **full mini-RAG system** w
 - 🔍 Semantic retrieval (cosine similarity, keyword backup)
 - 🤖 LLM answer generation (Grok or custom OpenAI-compatible endpoint)
 - 📊 Metadata & token tracking (including page counts for PDFs)
-- 🌍 Automatic language detection (browser headers + IP geolocation)
-- 🗣️ Multilingual UI (English, Romanian, French, Spanish, German)
+- 🌍 Start-screen language choice (English or Romanian)
+- 🗣️ Bilingual UI (English, Romanian)
 - 💬 Language-aware LLM responses (responds in user's language)
 - 🔍 LangSmith tracing & observability
 - 📱 Mobile-friendly Streamlit UI
@@ -291,7 +291,7 @@ Future improvements for stronger security and privacy:
 - Optional user accounts
 - Enhanced security features (see roadmap)
 
-See **IMPLEMENTATION_IMPROVEMENTS.md** for detailed sprint breakdown.
+See **FUTURE_ADD_INS.md** for the open improvement backlog.
 
 ---
 
@@ -462,7 +462,7 @@ LLM_MODEL=...
 - **STEP_4_AI_QUERY.md** — LLM integration & LangSmith tracing
 - **STEP_5_PIPELINE.md** — End-to-end orchestration
 - **STEP_6_HISTORY_TRACKING.md** — Persistent history implementation
-- **IMPLEMENTATION_IMPROVEMENTS.md** — Sprint roadmap & known issues
+- **FUTURE_ADD_INS.md** — Proposed features and open improvements
 - **PROJECT_OVERVIEW.md** — This file (high-level overview + feature ideas)
 
 ---

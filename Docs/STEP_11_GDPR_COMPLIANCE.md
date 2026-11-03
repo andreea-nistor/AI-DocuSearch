@@ -1,526 +1,134 @@
 # Step 11: GDPR Compliance & Legal Framework
 
+**Status:** Experimental privacy controls. These are technical controls for privacy obligations and are not a legal compliance certification. Legal and security review is required before production use.
+
 ## Overview
 
-This module provides consent, local-data export, local-data deletion, and legal disclosures intended
-to support privacy obligations. These technical controls do not by themselves certify compliance
-with GDPR, CCPA, or any other law.
+Step 11 adds the consent gate, local data export, local data deletion, and in-app legal pages to AI DocuSearch. The goal is to make the data flow visible to users before any document is processed and to give them simple controls over the data the app stores for their browser session.
 
-**Purpose:**
-- Obtain explicit user consent before processing documents
-- Provide users with data export (right to portability)
-- Enable users to delete locally associated history, feedback, and selected in-memory document state
-- Transparently disclose third-party data sharing
-- Host Privacy Policy, Terms of Service, and Third-Party Services pages
+The implementation has three parts:
 
-**Status:** Implemented for experimental use; legal and security review is still required before production use.
+- A consent notice that blocks the app until the user accepts it.
+- A footer with data management controls (download, delete) and links to the legal pages.
+- Three legal pages (Privacy Policy, Terms of Service, Third-Party Services) rendered from Markdown files in `Policies/`.
 
----
+All of the code for this step lives in [src/gdpr_compliance.py](../src/gdpr_compliance.py), with the page wiring in [app_pages/home.py](../app_pages/home.py) and [web_app.py](../web_app.py).
 
-## Architecture
+## Goals
 
-### Module: `src/gdpr_compliance.py`
+- Obtain consent before any document is processed.
+- Let the user export their session data as portable JSON (access and portability).
+- Let the user delete the history and feedback files that the app stores for their session (erasure).
+- Disclose third-party data sharing in plain language.
+- Keep the legal text in versioned Markdown so it can be reviewed and edited without touching code.
 
-**Core Responsibilities:**
-1. Display consent banner before document processing
-2. Manage consent state (accept/reject)
-3. Export user data in portable JSON format
-4. Delete the current session's server-local history and feedback files and selected in-memory state
-5. Display third-party service disclosures
+## Design Decisions
 
-**Key Functions:**
+- **Session-scoped identity.** Each Streamlit session gets a random UUID hex identifier on first load. Export and deletion act only on the files named after that identifier, so one user cannot read or delete another session's data through the UI.
+- **Consent is a session flag, not a stored record.** The acceptance is kept in `st.session_state` and survives reruns, but it is not written to disk. A page refresh or new browser session asks again.
+- **Gate in the page flow, not in each feature.** The consent check runs early in `app_pages/home.py`, after the language choice and before the upload and question controls render. Nothing downstream needs to check consent again.
+- **Footer instead of sidebar.** The data controls sit in a footer that renders on every page load. The old sidebar function still exists only as a no-op for backward compatibility.
+- **Legal pages as dedicated Streamlit pages.** Privacy Policy, Terms of Service, and Third-Party Services are registered as hidden pages in `web_app.py`, so links stay inside the app rather than opening external files.
+- **Markdown source with a Romanian variant.** `src/i18n.py` reads `Policies/<NAME>.md` and prefers `Policies/<NAME>.ro.md` when the user chose Romanian.
 
-| Function | Purpose | Returns |
-|----------|---------|---------|
-| `show_consent_banner()` | Display GDPR notice, require checkbox + button | bool (consent_given) |
-| `export_user_data(session_id, ...)` | Export all user data as JSON | dict |
-| `delete_user_data(session_id, ...)` | Permanently delete user's data | bool (success) |
-| `show_gdpr_footer(session_id, ...)` | Display footer with data management links | None |
-| `get_consent_key()` | Get session state key for consent tracking | str |
+## How the Flow Works
 
-### Legal Documents
+1. **Language choice.** The start screen asks for English or Română. The consent notice is shown in the chosen language.
+2. **Consent gate.** `show_consent_banner()` checks `gdpr_consent_given` in session state. If it is not `True`, the banner shows the processing notice, links to the Privacy Policy and Terms of Service, and a single "I Agree & Continue" button. `home.py` calls `st.stop()` until the button is clicked, then the button sets the flag and reruns the page.
+3. **Normal use.** Once accepted, uploads, questions, history logging, and cost tracking work as usual. The banner is not shown again for the rest of the session.
+4. **Footer.** After the main content, `show_gdpr_footer()` renders the data management row, which contains:
+   - **Download Data:** builds the export and reveals a download button for the JSON file.
+   - **Delete Data:** shows a warning and a confirmation checkbox. Deletion runs only after the checkbox is ticked.
+   - **Privacy Policy, Terms of Service, Third-Party Services:** page links.
+   - A short list of the user's rights (text only, see Limitations).
 
-The application renders `PRIVACY_POLICY.md`, `TERMS_OF_SERVICE.md`, and
-`THIRD_PARTY_SERVICES.md` as linked in-app pages registered by `web_app.py`.
+### Data Export
 
-**PRIVACY_POLICY.md** (~260 lines)
-- GDPR/CCPA-oriented privacy documentation
-- Sections:
-  1. Introduction
-  2. Project Operator and Data Controller
-  3. Information We Collect
-  4. How We Use Your Information
-  5. Data Retention & Deletion
-  6. Third-Party Data Sharing
-  7. Data Security
-  8. Your Rights Under GDPR
-  9. CCPA Rights (California Residents)
-  10. Contact
-  11. Children's Privacy
-  12. International Data Transfers
-  13. Changes to This Privacy Policy
-  14. Summary of Your Controls
-  15. Legal Basis for Processing (GDPR Article 6)
+`export_user_data(session_id, history_manager, feedback_manager)` builds a dictionary with:
 
-**TERMS_OF_SERVICE.md** (~175 lines)
-- User agreement & AI system disclaimers
-- Sections:
-  1. Service Status and Operator
-  2. Acceptance and Eligibility
-  3. Experimental Service
-  4. Usage Limits and Cost Estimates
-  5. User Responsibilities and Prohibited Uses
-  6. Uploaded Documents and Processing Permission
-  7. File Retention
-  8. AI Limitations and Professional Advice
-  9. Third-Party Services and International Processing
-  10. History, Feedback, Export, and Deletion
-  11. Intellectual Property
-  12. Feedback
-  13. Suspension and Termination
-  14. Disclaimers
-  15. Limitation of Liability
-  16. Applicable Law and Disputes
-  17. Changes to These Terms
-  18. Severability
-  19. Contact
-  14. GDPR/CCPA compliance
-  15. Export controls
-  16. Entire agreement
-  17. Contact information
-  18. Definitions
+- `export_date`, `session_id`, and `version` (`"1.0"`).
+- `questions_and_answers`: one entry per history record, with timestamp, question, answer, document name, mode, and metrics.
+- `feedback`: one entry per feedback record, with timestamp, rating, question, feedback type, comment, and document name.
+- `cost_tracking`: total cost, remaining budget, budget percentage, query count, and the budget limit (USD 0.50).
+- `metadata`: counts of questions and feedback entries, the export format, and a portability note.
 
----
+Each part is read inside its own `try` block. If history, feedback, or cost data fails to load, the error is printed and the other sections are still exported with empty values.
 
-## Consent Flow
+The footer serializes the dictionary as UTF-8 JSON with indentation and offers it as `docusearch_data_<session_id>_<YYYYMMDD_HHMMSS>.json` with MIME type `application/json`.
 
-### 1. First Visit — Consent Banner
+### Data Deletion
 
-**When:** User opens app for first time (before any content shown)
+`delete_user_data(session_id, history_manager, feedback_manager)` does the following:
 
-**Display:**
-```
-🔒 Privacy & Data Processing Notice
+1. Deletes `history/user_<session_id>.json` if a history manager is present and the file exists.
+2. Deletes `feedback/user_<session_id>.json` if a feedback manager is present and the file exists.
+3. Resets in-memory state: `chat_history` is emptied, and `document_text`, `rag_pipeline`, and `page_count` are set to `None`.
+4. Returns `True`. Any exception is printed and the function returns `False`, and the footer shows an error message.
 
-By using AI DocuSearch, you consent to:
-- Processing your documents with AI models (text excerpts, and page images when picture
-  interpretation is enabled, are sent to the configured LLM provider)
-- Storing chat history for 30 days and feedback for 90 days (auto-deleted after)
-- Analytics & debugging via LangSmith
-- Language detection from IP/browser
+After a successful deletion the footer shows a success message and calls `st.rerun()`.
 
-Your rights:
-- 📥 Download your data anytime
-- 🗑️ Delete your data anytime
-- ⏰ Auto-deletion after 30 days (history) / 90 days (feedback)
-
-[✅ I Agree & Continue]
-```
-
-The banner also links to the in-app Privacy Policy and Terms of Service pages; there is no
-separate "More info" button.
-
-**Implementation:**
-```python
-from src.gdpr_compliance import show_consent_banner
-
-if not show_consent_banner():
-    st.stop()  # Block app until consent given
-```
-
-**Session State:**
-- Key: `"gdpr_consent_given"`
-- Value: `True` after button click
-- Persists: Across reruns (user doesn't re-consent on page refresh)
-
-### 2. Accepted — Processing Enabled
-
-Once consent given:
-- Document upload enabled
-- Questions can be asked
-- Chat history recorded
-- Cost tracking starts
-
-### 3. Footer — Data Management Links
-
-**Always visible** at bottom of page:
-
-```
-### 🔒 Privacy & Data Management
-
-[📥 Download Data] [🗑️ Delete Data] [📜 Privacy] [📋 Terms] [🔗 3rd Parties]
-
-Your GDPR Rights:
-- ✅ Access your data (📥 Download)
-- ✅ Delete your data (🗑️ Delete)
-- ✅ Data portability (JSON format)
-- ✅ Restrict processing
-- ✅ Object to tracking
-```
-
----
-
-## Data Export (Right to Portability)
-
-### Trigger: "Download Data" Button
-
-**What's Exported:**
-```json
-{
-  "export_date": "2026-08-25T10:45:30.123456",
-  "session_id": "user_12345",
-  "version": "1.0",
-  "data": {
-    "questions_and_answers": [
-      {
-        "timestamp": "2026-08-25T10:30:00",
-        "question": "What are contract dates?",
-        "answer": "The contract runs from June 1 to August 31, 2026...",
-        "document": "contract.pdf",
-        "mode": "Hybrid",
-        "metrics": {
-          "total_seconds": 2.34,
-          "chunk_count": 3,
-          "total_tokens": 450
-        }
-      }
-    ],
-    "feedback": [
-      {
-        "timestamp": "2026-08-25T10:31:00",
-        "rating": true,
-        "question": "What are contract dates?",
-        "comment": "Accurate and concise"
-      }
-    ],
-    "cost_tracking": {
-      "total_cost_usd": 0.12,
-      "remaining_budget_usd": 0.38,
-      "budget_percentage": 24,
-      "queries_count": 6
-    },
-    "metadata": {
-      "total_questions": 8,
-      "total_feedback_entries": 2,
-      "export_format": "JSON",
-      "portability": "This data can be imported into any compatible service"
-    }
-  }
-}
-```
-
-### Format
-- **File name:** `docusearch_data_{session_id}_{timestamp}.json`
-- **MIME type:** `application/json`
-- **Encoding:** UTF-8
-- **Portability:** Standard JSON, no proprietary format
-
-### Use Cases
-- User compliance: Comply with GDPR Article 15 (right to access)
-- Data portability: GDPR Article 20 (transfer to another service)
-- Personal backup: User downloads their conversation history
-- Audit trail: Evidence of data processing for legal review
-
----
-
-## Data Deletion (Right to Erasure)
-
-### Trigger: "Delete Data" Button
-
-**Safeguard:** Confirmation checkbox required
-```
-⚠️ This will permanently delete ALL your data!
-[☐ I understand - delete everything]
-```
-
-**What's currently deleted:**
-1. Chat history file (`history/user_{session_id}.json`)
-2. Feedback file (`feedback/user_{session_id}.json`) — if exists
-3. In-memory chat history, extracted document text, retrieval pipeline, and page count
-
-The current implementation does not clear every Streamlit state key or the session cost tracker,
-and it cannot delete copies already processed or retained by configured third-party services.
-
-**Implementation:**
-```python
-def delete_user_data(session_id, history_manager, feedback_manager=None):
-    # Delete history
-    history_file = Path("history") / f"user_{session_id}.json"
-    if history_file.exists():
-        history_file.unlink()
-    
-    # Delete feedback
-    feedback_file = Path("feedback") / f"user_{session_id}.json"
-    if feedback_file.exists():
-        feedback_file.unlink()
-    
-    # Clear selected in-memory document and chat state
-    st.session_state.chat_history = []
-    st.session_state.document_text = None
-    st.session_state.rag_pipeline = None
-    st.session_state.page_count = None
-    
-    return True
-```
-
-**User Confirmation:**
-```
-✅ Locally associated history, feedback, and selected document state were deleted.
-```
-
-Deletion of the local files is irreversible. Third-party retention is governed by each configured
-provider and is outside this control.
-
----
+What is not cleared: the cost tracker for the session, the session identifier, the language choice, the consent flag, and any other Streamlit state keys. Data already sent to a third-party provider is not recalled by this step.
 
 ## Third-Party Data Sharing
 
-### Services with Data Access
+| Service | Data sent | Purpose |
+|---------|-----------|---------|
+| Configured LLM provider | Document excerpts or full text (Direct LLM fallback), questions, and page images when picture interpretation is enabled | Answer generation and picture description |
+| LangSmith | Traces and metrics, only when tracing is enabled | Debugging and monitoring |
+| Streamlit Cloud | App data | Hosting |
 
-| Service | Data Shared | Purpose | Privacy |
-|---------|-------------|---------|---------|
-| **Configured LLM provider** (OpenAI, xAI, Groq, etc.) | Document text/excerpts + questions; page images when picture interpretation is enabled | LLM processing | Provider's own privacy policy |
-| **LangSmith** | Token counts, latency, logs | Debugging & monitoring | LangSmith Privacy |
-| **ip-api.com** | IP address only | Language detection | No data storage |
-| **Streamlit Cloud** | App data | Hosting | Streamlit Privacy |
+The full disclosure is on the Third-Party Services page and in `Policies/THIRD_PARTY_SERVICES.md`. RAG answers send only the retrieved chunks to the LLM. The Direct LLM fallback can send the full extracted text.
 
-### Disclosure
-Displayed in footer + Privacy Policy:
-```
-🔗 Third-Party Services:
-- Configured LLM provider: Document processing
-- LangSmith: Analytics & debugging
-- ip-api.com: Geolocation-based language detection
-- Streamlit Cloud: App hosting
-```
+## Configuration
 
-### User Control
-- Users can disable LangSmith: Set `LANGSMITH_TRACING=false`
-- Language detection can't be disabled (required for UX)
-- Relevant document chunks are sent to the configured LLM for RAG answers; the full extracted text
-  may be sent during Direct LLM fallback
+Step 11 itself has no required settings. The related retention and tracing variables are:
 
----
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `HISTORY_ENABLED` | `true` | When false, history is not written, and the history retention cleanup is skipped. |
+| `HISTORY_RETENTION_DAYS` | `30` | History files whose entries are all older than this are deleted by the hourly cleanup. |
+| `FEEDBACK_RETENTION_DAYS` | `90` | Feedback files older than this (by file age) are deleted by the hourly cleanup. |
+| `LANGSMITH_TRACING` | `false` when unset | Set to `false` to disable LangSmith tracing. |
 
-## Integration Points
+The retention cleanup runs from `app_pages/home.py` through a Streamlit cache with a one-hour TTL, so the directory scan happens at most once per hour per server process.
 
-### 1. Home Page (`app_pages/home.py`)
+## Error Handling and Fallbacks
 
-**Consent Check (early):**
-```python
-from src.gdpr_compliance import show_consent_banner
+- **Export errors:** each data source is isolated. A failure in cost, history, or feedback loading is logged and leaves that section empty instead of blocking the download.
+- **Delete errors:** an exception stops the deletion and returns `False`, and the user sees an error message. Files already removed before the error stay removed.
+- **Missing files:** deletion checks for existence before removing, so a session with no history or feedback completes without error.
+- **Romanian legal text:** the English file is used when no `.ro.md` variant is available for a document.
 
-if not show_consent_banner():
-    st.stop()
+## Tests
+
+The repository has no dedicated unit tests for the export and deletion functions. The existing test that covers this step is:
+
+```powershell
+python -m test_src.test_legal_pages
 ```
 
-**Footer Display (late):**
-```python
-from src.gdpr_compliance import show_gdpr_footer
+It runs from the repository root and checks that:
 
-show_gdpr_footer(
-    session_id=str(st.session_state.get("session_id", "unknown")),
-    history_manager=st.session_state.get("history_manager"),
-    feedback_manager=None
-)
-```
+- The start screen offers English and Română before the consent notice, and the chosen language is stored.
+- The footer links to the Privacy Policy, Terms of Service, and Third-Party Services pages.
+- Each legal page renders without an exception and shows its expected heading.
 
-### 2. Cost Tracker (`src/cost_tracker.py`)
+Other tests set `gdpr_consent_given` to `True` in session state so they can reach the main page. Export and deletion behavior is currently verified manually: accept the notice, ask a question, download the JSON, then delete the data and confirm the history file is gone.
 
-**Data Included in Export:**
-```python
-cost_data = export_cost_data()  # From cost_tracker
+## Limitations
 
-# In GDPR export
-user_export["data"]["cost_tracking"] = {
-    "total_cost_usd": cost_data["total_cost_usd"],
-    "remaining_budget_usd": cost_data["remaining_budget_usd"],
-    "budget_percentage": cost_data["budget_percentage"],
-    "queries_count": cost_data["queries_count"],
-}
-```
+- The consent notice blocks the whole app until accepted. There is no per-feature consent.
+- Consent is not persisted across sessions or devices, so the notice appears again after a refresh.
+- "Restrict processing" and "Object to tracking" appear as rights in the footer text, but no control implements them.
+- Deletion does not reset the session cost tracker, and it cannot delete copies held by third-party providers or LangSmith.
+- Email-based deletion requests, audit logs, and a data protection impact assessment are not implemented.
+- The privacy contact details in the legal documents are placeholders that must be replaced before production use.
 
-### 3. History Manager (`src/history_manager.py`)
+## Related
 
-**Data Exported:**
-- All questions & answers for session
-- Document name & timestamp
-- Performance metrics
-
-**Data Deleted:**
-- History JSON file removed from disk
-
----
-
-## Regulatory Compliance
-
-### GDPR (European Union)
-
-**Applicable Articles:**
-- Art. 5: Lawful basis (consent + transparency)
-- Art. 12-15: Right to access data
-- Art. 16: Right to rectification
-- Art. 17: Right to erasure ("right to be forgotten")
-- Art. 20: Right to data portability
-- Art. 21: Right to object
-- Art. 22: Automated decision-making
-- Art. 32-36: Data security, breach notification
-
-**Compliance:**
-✅ Explicit consent before processing  
-✅ Transparent privacy policy  
-✅ Data export in portable format  
-✅ Permanent deletion capability  
-✅ No automated decision-making  
-✅ Secure data handling (HTTPS, memory isolation)  
-✅ Breach notification process documented  
-
-### CCPA (California, USA)
-
-**Applicable Sections:**
-- § 1798.100: Right to know
-- § 1798.105: Right to delete
-- § 1798.110: Right to know (categories of data)
-- § 1798.115: Right to know (data sources)
-- § 1798.130: Right to opt-out of sale
-
-**Compliance:**
-✅ Data export (right to know)  
-✅ Data deletion (right to delete)  
-✅ Privacy policy disclosures  
-✅ No data "sale" (no third-party sharing for money)  
-
-### PIPEDA (Canada)
-✅ Consent + transparency  
-✅ Data access/portability  
-✅ Deletion capability  
-
-### POPIA (South Africa)
-✅ Lawful processing basis  
-✅ Purpose limitation  
-✅ Data minimization  
-
-### LGPD (Brazil)
-✅ Legal basis for processing  
-✅ Data export & deletion  
-✅ Privacy policy  
-
----
-
-## User Experience
-
-### Before Processing
-```
-1. User opens app
-2. Consent banner appears (cannot dismiss)
-3. User reads: "Processing documents with AI..."
-4. User clicks checkbox: "I understand..."
-5. User clicks "I Agree & Continue"
-6. Banner disappears, app unlocks
-7. User can now upload documents
-```
-
-### After Accepting
-```
-1. User uploads PDF, asks questions
-2. At any time, user can click "Download Data" (footer)
-3. Browser downloads JSON file with all history
-4. Or user can click "Delete Data" to wipe everything
-5. Links to Privacy Policy and Terms open dedicated pages inside the Streamlit application
-```
-
-### On Deletion
-```
-1. User clicks "Delete Data"
-2. Warning appears: "This is permanent"
-3. Checkbox required: "I understand"
-4. User clicks "Delete"
-5. All data removed instantly
-6. Success message: "Data deleted"
-7. Session clears, app resets
-```
-
----
-
-## Testing Methods
-
-### Unit Tests: Consent Tracking
-```python
-import streamlit as st
-from src.gdpr_compliance import show_consent_banner, get_consent_key
-
-# Test: Initially no consent
-assert get_consent_key() not in st.session_state
-
-# Simulate user clicking "I Agree"
-st.session_state[get_consent_key()] = True
-assert show_consent_banner() == True  # Returns True after consent
-```
-
-### Integration Test: Data Export
-```python
-from src.gdpr_compliance import export_user_data
-
-user_data = export_user_data(
-    session_id="test_123",
-    history_manager=history_mgr,
-    feedback_manager=None
-)
-
-assert user_data["session_id"] == "test_123"
-assert "questions_and_answers" in user_data["data"]
-assert "cost_tracking" in user_data["data"]
-```
-
-### Manual Testing: Full Flow
-1. Open app incognito/private window
-2. Consent banner appears ✓
-3. Cannot upload file until consent ✓
-4. Click checkbox + button ✓
-5. Upload document ✓
-6. Ask question ✓
-7. Scroll to footer ✓
-8. Click "Download Data" — JSON downloads ✓
-9. Click "Delete Data" — confirmation required ✓
-10. Verify data deleted (attempt to view history) ✓
-
----
-
-## Limitations & Future Work
-
-### Current
-- Consent banner blocks entire app (strict but user-friendly)
-- Email verification not implemented
-- No multi-device synchronization
-
-### Planned
-- [ ] Cookie-based consent (remember across devices)
-- [ ] Email-based data deletion requests
-- [ ] Account linking (multi-session tracking)
-- [ ] Audit logs for compliance reports
-- [ ] DPIA (Data Protection Impact Assessment) tool
-
----
-
-## References
-
-- **GDPR:** https://gdpr-info.eu/
-- **CCPA:** https://oag.ca.gov/privacy/ccpa
-- **Privacy Policy:** [PRIVACY_POLICY.md](../PRIVACY_POLICY.md)
-- **Terms of Service:** [TERMS_OF_SERVICE.md](../TERMS_OF_SERVICE.md)
-- **Legal Counsel:** Consult a lawyer for your jurisdiction
-
----
-
-## Contact & Support
-
-For privacy inquiries, data requests, or concerns:
-- Email: [privacy@example.com] — **Add your email**
-- GitHub Issues: [Report compliance bugs]
-- Privacy Dashboard: [Future feature]
-
----
-
-**Last Updated:** 2026-09-15
-**Version:** 1.2
-**Status:** Experimental privacy controls; not a legal compliance certification
+- [STEP_6_HISTORY_TRACKING.md](STEP_6_HISTORY_TRACKING.md): history files that export and deletion act on.
+- [STEP_8_FEEDBACK_COLLECTION.md](STEP_8_FEEDBACK_COLLECTION.md): feedback files included in export and deletion.
+- [STEP_9_INTERNATIONALIZATION.md](STEP_9_INTERNATIONALIZATION.md): language choice shown before the consent notice.
+- [STEP_10_COST_TRACKING.md](STEP_10_COST_TRACKING.md): cost data included in the export.
+- [STEP_12_PICTURE_INTERPRETATION.md](STEP_12_PICTURE_INTERPRETATION.md): page images sent to the LLM provider, disclosed in the consent notice.
+- [STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md](STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md): hosting context for the third-party disclosure.

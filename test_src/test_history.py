@@ -172,8 +172,9 @@ def test_streamlit_session_ids_are_unique():
     """Test that separate browser sessions cannot share persistence files."""
     from streamlit.testing.v1 import AppTest
 
-    first = AppTest.from_file("web_app.py", default_timeout=20).run()
-    second = AppTest.from_file("web_app.py", default_timeout=20).run()
+    web_app = Path(__file__).resolve().parent.parent / "web_app.py"
+    first = AppTest.from_file(web_app, default_timeout=20).run()
+    second = AppTest.from_file(web_app, default_timeout=20).run()
 
     first_session_id = first.session_state["session_id"]
     second_session_id = second.session_state["session_id"]

@@ -229,11 +229,11 @@ def answer_question(
         lite_mode = True
     else:
         idx = pipeline["index"].search(question, k=top_k)
-        indices = idx.get("indices", [])
+        indices = [i for i in idx.get("indices", []) if 0 <= i < len(chunks)]
         lite_mode = False
     retrieval_seconds = time.perf_counter() - retrieval_start
 
-    selected_chunks = [chunks[i] for i in indices if i < len(chunks)]
+    selected_chunks = [chunks[i] for i in indices]
     picture_descriptions = extract_picture_descriptions(selected_chunks)
     context = "\n\n".join(selected_chunks)
     if requested_pages:

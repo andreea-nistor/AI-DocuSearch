@@ -1,597 +1,158 @@
 # Step 6: Question History Tracking & Multi-User Isolation
 
-## Overview
-✅ **FULLY IMPLEMENTED** — Persistent per-user question history with dual-layer storage (in-memory + disk), document filtering, session isolation, and automatic cleanup. Each browser session maintains its own private history file. Complete metrics (tokens, timing, retrieval performance) are stored for analytics.
+**Status:** Implemented. Per-session JSON history, in-session chat display, document-scoped restore, retention cleanup, and a command-line inspection tool are in place. The sidebar history panel is not implemented.
 
-## Purpose
-- Track all user questions and answers for a session (in real-time)
-- Store complete metrics (tokens, timing, retrieval performance) both in-memory and on disk
-- Display conversation history in chat interface with left/right aligned bubbles
-- Maintain multi-user isolation (each browser session is private)
-- Provide analytics/audit capability via CLI tool and disk JSON files
-- Filter history by document for clarity within a session
-- Enable follow-up questions with full context
+## Goal
 
-## Key Concepts
+Keep a record of each successful question and answer together with its metrics (timing, retrieval, tokens, temperature), so that:
 
-### Session Isolation
-- Each browser session = isolated "user" (Streamlit enforces this natively)
-- A random `uuid4().hex` identifier is generated once when the session initializes
-- Separate history files: `history/user_{session_id}.json`
-- One user cannot see another user's history or documents
-- Browser close/refresh = new session (new history file)
+- the user can see their conversation for the document they are working on,
+- the conversation survives a page refresh within the same browser session and can be restored when the same document is uploaded again,
+- an administrator can inspect and export history without running the web app,
+- one browser session never sees another session's history.
 
-### Document Filtering
-- Within a single session, questions accumulate across all documents
-- But sidebar shows only questions for the current document
-- All data is preserved; filtering is UI-level only
-- When switching documents in same session, sidebar automatically re-filters
-
-### Multi-User Behavior
-- Concurrent users: separate `st.session_state`, separate history files
-- No cleanup contention: each session's cleanup doesn't affect others
-- No cross-user data leakage: Streamlit's isolation is enforced
-- Temporary upload copies use unique filenames and are deleted immediately after extraction and page counting
-
----
-
-## Detailed Implementation Steps
-
-### Step 6.1: Hybrid Storage Architecture (IMPLEMENTED)
-**Purpose:** Dual-layer history storage for performance + persistence
-
-**Design:**
-- **In-Memory Layer** (`st.session_state.chat_history`): Fast, survives Streamlit reruns within session, instant UI updates
-- **Disk Layer** (`history/user_{session_id}.json`): Server-local persistence associated with the
-    active session ID; it is not durable across Streamlit Cloud instance replacement
-
-**Class: `HistoryManager` (`src/history_manager.py`)**
-
-Handles all disk-level operations:
-
-```python
-class HistoryManager:
-    def __init__(self, session_id: str):
-        """Initialize with unique session ID"""
-        self.session_id = session_id
-        self.history_dir = "history"
-        self.history_file = os.path.join(self.history_dir, f"user_{session_id}.json")
-        # Auto-creates history/ directory
-        
-    def add_question(self, question: str, answer: str, mode: str, 
-                     metrics_dict: dict, document_name: str) -> None:
-        """Append question+answer to disk JSON with ISO 8601 timestamp"""
-        # Creates/updates history/user_{session_id}.json
-        
-    def load_session_history(self) -> List[Dict[str, Any]]:
-        """Load all history entries, sorted newest first"""
-        # Returns list sorted by timestamp (descending)
-        
-    def get_recent_questions(self, document_name: Optional[str] = None, 
-                            limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent questions, optionally filtered by document name"""
-        # Filters by document, returns up to limit items
-        
-    @staticmethod
-    def cleanup_old_sessions(retention_days: int = 30) -> None:
-        """Delete session files where newest entry > retention_days old"""
-        # Scans history/ folder, removes stale files
-        # Also removes empty JSON files
-```
-
-**File location:** `src/history_manager.py`
-
-**Data format:** `history/user_{session_id}.json`
-```json
-[
-  {
-    "timestamp": "2025-08-18T10:30:45.123456",
-    "question": "What are contract dates?",
-    "answer": "The contract runs from January 1...",
-    "mode": "RAG",
-    "document_name": "contract.pdf",
-    "metrics": {
-      "total_seconds": 2.5,
-      "retrieval_seconds": 1.2,
-      "generation_seconds": 1.3,
-      "chunk_count": 3,
-      "prompt_tokens": 450,
-      "completion_tokens": 120,
-      "total_tokens": 570,
-      "temperature": 0.2
-    }
-  }
-]
-```
-
-**Key methods:**
-- `add_question()` — Appends new entry to session's JSON file with ISO 8601 timestamp
-- `load_session_history()` — Reads entire JSON file into memory
-- Writes go through `write_json_atomic` (temp file, then `os.replace`), so a crash cannot leave a truncated file
-- `get_recent_questions(document_name)` — Filters by document, returns sorted by timestamp (newest first)
-- `cleanup_old_sessions()` — Static method; scans `history/` and deletes files whose newest entry is older than `retention_days` (default 30)
-
----
-
-### Step 6.2: Web App Integration (IMPLEMENTED)
-**Purpose:** Wire history tracking into Streamlit app lifecycle
-
-**Initialization (`app_pages/home.py`):**
-```python
-from uuid import uuid4
-
-if "history_manager" not in st.session_state:
-    session_id = uuid4().hex
-    st.session_state.session_id = session_id
-    st.session_state.history_manager = HistoryManager(session_id)
-    st.session_state.feedback_manager = FeedbackManager(session_id)
-
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []  # In-memory cache
-```
-
-**Cleanup (at most once per hour):**
-Retention cleanup for history and feedback runs in `_run_retention_cleanup_once_per_hour()` in
-`app_pages/home.py`, decorated with `@st.cache_resource(ttl=3600)`. Streamlit reruns the script on
-every interaction, so this avoids scanning the directories on each rerun.
-
-**Logging function (`app_pages/home.py`):**
-```python
-def log_to_history(mode: str, question: str, result: dict, document_name: str) -> None:
-    """Log to both in-memory (session state) and disk (JSON file)"""
-    # 1. Extract metrics from result dict
-    metrics_dict = {
-        "total_seconds": result.get("total_seconds", 0),
-        "retrieval_seconds": result.get("retrieval_seconds", 0),
-        "generation_seconds": result.get("generation_seconds", 0),
-        "chunk_count": result.get("chunk_count", 0),
-        "prompt_tokens": result.get("prompt_tokens", 0),
-        "completion_tokens": result.get("completion_tokens", 0),
-        "total_tokens": result.get("total_tokens", 0),
-        "temperature": result.get("temperature", 0.2),
-    }
-    
-    # 2. Create entry with ISO 8601 timestamp
-    entry = {
-        "timestamp": datetime.now().isoformat(),
-        "question": question,
-        "answer": result.get("raw_answer", ""),
-        "mode": mode,
-        "document_name": document_name,
-        "metrics": metrics_dict,
-    }
-    
-    # 3. Add to in-memory session cache (instant display)
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    st.session_state.chat_history.append(entry)
-    
-    # 4. Add to disk history (persistence)
-    st.session_state.history_manager.add_question(
-        question=question,
-        answer=result.get("raw_answer", ""),
-        mode=mode,
-        metrics_dict=metrics_dict,
-        document_name=document_name
-    )
-```
-
-**Calling:**
-```python
-# Only successful provider responses are stored.
-if result.get("response_status") == "success":
-    log_to_history("Hybrid", question, result, st.session_state.get("uploaded_name", "unknown"))
-```
-
----
-
-### Step 6.3: Chat History Display (IMPLEMENTED)
-**Purpose:** Show conversation history in main chat area with message bubbles
-
-**Implementation (`app_pages/home.py`):**
-
-**Function: `render_chat_history()`**
-```python
-def render_chat_history() -> None:
-    """Display conversation history from in-memory session state with chat bubbles."""
-    # Get from session state (always available, survives reruns)
-    if "chat_history" not in st.session_state or not st.session_state.chat_history:
-        return
-    
-    # Filter by current document
-    current_doc = st.session_state.get("uploaded_name", None)
-    recent = [
-        entry for entry in st.session_state.chat_history
-        if entry.get("document_name") == current_doc
-    ]
-    
-    if not recent:
-        return
-    
-    # Render with CSS styling (left/right aligned bubbles)
-    # User message (left): "YOU" avatar + question + timestamp
-    # Bot message (right): 🤖 avatar + answer + mode badge
-```
-
-**Chat Bubble Styling:**
-- **User messages:** Left-aligned, gray background (#d3d3d3), black text
-- **Bot messages:** Right-aligned, green background (#4caf50), white text
-- **Avatars:** Circular, sized 36px, color-coded (green for user, blue for bot)
-- **Dark mode:** CSS @media query for `prefers-color-scheme: dark`
-- **Layout:** Flexbox with proper alignment and spacing
-
-**Display Order:** Messages shown chronologically (reversed from storage order, oldest first)
-
-**Per-Message Info:**
-- Timestamp (first 16 chars: YYYY-MM-DD HH:MM)
-- Mode badge (RAG, Direct LLM, or Hybrid)
-- Question text (full)
-- Answer text (full, truncated if very long)
-
-**Integration (`app_pages/home.py`):**
-```python
-render_chat_history()  # Called in main container after document upload
-```
-
----
-
-### Step 6.4: History Loading on Document Upload (IMPLEMENTED)
-**Purpose:** Restore previous questions when user re-uploads same document
-
-**Logic (`app_pages/home.py`):**
-```python
-if history_enabled and st.session_state.history_manager:
-    # Get questions for this document from disk
-    disk_history = st.session_state.history_manager.get_recent_questions(
-        document_name=uploaded_name,
-        limit=int(os.getenv("HISTORY_LIMIT", "10"))
-    )
-    # Prepend to current session's chat_history
-    if disk_history:
-        st.session_state.chat_history = disk_history + st.session_state.chat_history
-```
-
-**Behavior:**
-- On first document upload in session: loads past Q&A from disk
-- On document switch: filters displayed history to current doc only
-- Marked as loaded via `loaded_docs` set (prevents duplicate loads)
-- User sees their conversation history immediately
-
----
-
-### Step 6.5: Optional Sidebar History Panel
-**Purpose:** Allow users to re-run previous questions
-
-**Current Status:** ⚠️ **Background tracking only** — Not displayed in UI  
-(History sidebar feature is in backlog; see `IMPLEMENTATION_IMPROVEMENTS.md` Sprint 2.1)
-
-**Planned function:**
-
-```python
-def render_history_sidebar():
-    """Display recent questions for current document in sidebar"""
-    if os.getenv("HISTORY_ENABLED", "true").lower() not in ("true", "1", "yes"):
-        return
-    
-    current_doc = st.session_state.get("uploaded_name", None)
-    if not current_doc:
-        st.sidebar.info("📋 Upload a document to see history")
-        return
-    
-    history = st.session_state.history_manager.get_recent_questions(
-        document_name=current_doc,
-        limit=int(os.getenv("HISTORY_LIMIT", "10"))
-    )
-    
-    if not history:
-        st.sidebar.info("📋 No history yet for this document")
-        return
-    
-    st.sidebar.markdown("### 📋 Session History")
-    for i, entry in enumerate(history):
-        timestamp = entry["timestamp"][:19]  # YYYY-MM-DD HH:MM:SS
-        mode = entry["mode"]
-        question = entry["question"][:50] + "..." if len(entry["question"]) > 50 else entry["question"]
-        
-        if st.sidebar.button(f"[{mode}] {timestamp}\n{question}", key=f"history_{i}"):
-            st.session_state.last_question = entry["question"]
-            st.rerun()
-    
-    st.sidebar.divider()
-```
-
-The current `render_history_sidebar()` in `app_pages/home.py` is intentionally a no-op. A future
-implementation would be called before the main question input.
-```python
-render_history_sidebar()
-question = st.text_input("Ask a question about the document")
-```
-
----
-
-## Configuration
-
-**Environment Variables:**
-```env
-HISTORY_ENABLED=true          # Enable/disable history tracking
-HISTORY_RETENTION_DAYS=30     # How long to keep old session files
-HISTORY_LIMIT=10              # Max history entries to show in sidebar
-```
-
-**Defaults:**
-- `HISTORY_ENABLED`: true (tracking enabled by default)
-- `HISTORY_RETENTION_DAYS`: 30 days
-- `HISTORY_LIMIT`: 10 entries
-
----
-
-## Performance Considerations
-
-### Storage
-- **Per-question:** ~500 bytes average (question + answer + metrics)
-- **100 questions:** ~50 KB per session
-- **1000 sessions:** ~50 MB total (reasonable for long-running deployment)
-
-### Speed
-- **In-memory lookup:** O(n) where n = questions in session, <10ms for typical load
-- **Disk write:** ~5-10ms per question
-- **Loading history on document switch:** <50ms for 10 questions
-
-### Memory
-- Session state cache: ~1 MB per active session (100+ questions cached)
-- Streamlit Cloud typically handles 50+ concurrent sessions
-
----
-
-## Known Limitations & Future Work
-
-**Current (MVP):**
-- ✅ Disk persistence working
-- ✅ In-memory caching working
-- ✅ Document filtering working
-- ✅ Cleanup working
-- ⚠️ Sidebar UI not implemented (see Sprint 2)
-- ⚠️ CLI tool needs testing (see Sprint 2.3)
-
-**Potential Enhancements:**
-- [ ] Export history as PDF report
-- [ ] Analytics dashboard (total tokens, mode usage, etc.)
-- [ ] Question retry button (re-run from sidebar)
-- [ ] History search by keyword
-- [ ] Batch operations (delete multiple, export all)
-- [ ] Database backend (for high-volume deployments)
-
----
-
-## Testing
-
-**Manual Testing Checklist:**
-- [ ] Ask Q1, refresh browser → Q1 still shows
-- [ ] Ask Q1, upload doc A, upload doc B → History shows both docs
-- [ ] Switch between docs → History filters correctly
-- [ ] Wait 35 days, run cleanup → Old session removed
-- [ ] `history_cli.py list` shows all sessions
-- [ ] `history_cli.py show <id>` displays table
-
----
-
-## Module Location & File Structure
-
-**Files:**
-- `src/history_manager.py` — HistoryManager class (full implementation)
-
-```powershell
-# List questions for specific session
-python history_cli.py list --session user_abc123
-
-# List questions for specific document
-python history_cli.py list --document contract.pdf
-
-# Show full details of one question
-python history_cli.py show --session user_abc123 --index 0
-
-# Export to CSV
-python history_cli.py export --output history.csv
-python history_cli.py export --session user_abc123 --output session_history.csv
-python history_cli.py export --document contract.pdf --output contract_history.csv
-
-# Manually trigger cleanup
-python history_cli.py cleanup --days 30
-```
-
-**Implementation outline:**
-- Use `argparse` for CLI arguments
-- JSON file parsing and filtering
-- CSV export via `csv` module with columns: timestamp, question, answer, mode, document_name, metrics.*
-- Timestamp/file age comparison for cleanup
-- Clear summary output (count of entries, session info, etc.)
-
----
-
-### Step 6.5: Add Configuration via Environment Variables
-**Add to `.env`:**
-```env
-# Question history tracking (Step 6)
-HISTORY_ENABLED=true
-HISTORY_RETENTION_DAYS=30
-HISTORY_LIMIT=10
-```
-
-**Precedence:**
-- Env var if set
-- Hardcoded default in code
-- Feature completely disabled if `HISTORY_ENABLED=false`
-
----
-
-## Verification
-
-### Web App Functional Tests
-
-**Test 6.1: Single document, multiple questions**
-- Upload `contract.pdf`
-- Ask 3 questions (different modes: RAG, Direct LLM, Hybrid)
-- Verify sidebar shows all 3 with correct timestamps and modes
-- Click a sidebar question → question field updates
-- Can re-run with any mode
-
-**Test 6.2: Multiple documents in one session**
-- Upload `contract.pdf`, ask 2 questions (RAG mode)
-- Upload `report.docx`, ask 1 question (Direct LLM mode)
-- Sidebar shows only `report.docx`'s 1 question
-- Switch back to `contract.pdf` → sidebar shows 2 questions again
-- Verify JSON file contains all 3 entries
-
-**Test 6.3: Session isolation (multi-user)**
-- Open two browser tabs/windows (or incognito windows)
-- Tab 1: Upload `contract.pdf`, ask 2 questions
-- Tab 2: Upload `report.docx`, ask 1 question
-- Each tab's history is separate; no cross-contamination
-- Verify separate `user_*.json` files created
-
-**Test 6.4: Browser close/refresh**
-- Ask questions in session, close browser
-- Reopen app → no history (new session ID)
-- But old history files remain on disk (until cleanup)
-
-**Test 6.5: Cleanup**
-- Create a session file manually
-- Set its modification time to 31 days ago
-- Run app startup cleanup
-- Verify old file is deleted, recent files remain
-
-### CLI Functional Tests
-
-**Test 6.6: CLI list and export**
-- `python history_cli.py list` → shows all sessions and questions
-- `python history_cli.py list --document contract.pdf` → filters correctly
-- `python history_cli.py export --output out.csv` → CSV file with correct columns
-- `python history_cli.py show --session user_abc123 --index 0` → shows full entry
-
-**Test 6.7: CLI cleanup**
-- Age a session file to 31 days old
-- `python history_cli.py cleanup --days 30` → removes it
-- Recent files remain
-
-### Data Accuracy Checks
-- Verify JSON structure matches format above
-- Verify timestamps are ISO 8601 format (YYYY-MM-DDTHH:MM:SS.NNNNNN)
-- Verify all metrics fields present: total_seconds, retrieval_seconds, generation_seconds, chunk_count, prompt_tokens, completion_tokens, total_tokens, temperature
-- Verify metrics values match result dicts from pipeline
-- Verify document names captured correctly
-- Verify question and answer text preserved accurately
-
----
-
-## Relevant Files
-
-| File | Type | Purpose |
-|---|---|---|
-| `src/history_manager.py` | New | Core history logic: JSON I/O, session management, filtering, cleanup |
-| `history_cli.py` | New | CLI tool for inspection and batch operations |
-| `app_pages/home.py` | Modified | Initialize manager, store successful answers, render chat history, call cleanup |
-| `.env` | Modified | Add config variables: HISTORY_ENABLED, HISTORY_RETENTION_DAYS, HISTORY_LIMIT |
-| `Docs/STEP_6_HISTORY_TRACKING.md` | New | This documentation |
-
----
-
-## Architectural Decisions
+## Design Decisions
 
 | Decision | Rationale |
 |---|---|
-| **Per-session history files** (`user_{session_id}.json`) | Keeps each user's data isolated; leverages Streamlit's native session isolation |
-| **Document filtering (UI-level)** | Store all questions; filter in sidebar for clarity without data loss |
-| **Multi-user isolation** | Relies on Streamlit's built-in session isolation; no custom auth needed for basic separation |
-| **Auto-cleanup on startup** | Silent, non-intrusive; doesn't affect active sessions |
-| **File-based storage** | No database dependency; simple to inspect, debug, and audit |
-| **CLI tool separate from web app** | Allows admin/analytics access without running the Streamlit app |
-| **Complete metrics storage** | Enables future analytics (token trends, mode performance, etc.) |
+| One JSON file per browser session (`history/user_{session_id}.json`) | Isolation comes from separate files and from Streamlit's own per-session state. No authentication layer is needed. |
+| Random session ID (`uuid4().hex`) created once per Streamlit session | A browser refresh or a new visit starts a new session and a new file. |
+| Two layers: `st.session_state.chat_history` and the disk file | The in-memory list gives instant display and survives Streamlit reruns; the disk file gives persistence across reruns of the server process and feeds the CLI. |
+| Store all questions, filter by document in the UI | No data is lost when the user switches documents; each view only shows the relevant subset. |
+| Only successful provider answers are logged | Simulated and failed responses are not charged, stored, or shown as history. |
+| Atomic writes via `write_json_atomic` | A crash during a write cannot leave a truncated history file. |
+| File-based storage, no database | Files are easy to inspect, back up, and delete. A database is listed as a future option. |
 
----
+## How It Works
 
-## Multi-User Isolation Guarantees
+1. **Session start.** On the first run of a Streamlit session, `app_pages/home.py` generates a session ID, stores it in `st.session_state.session_id`, and creates a `HistoryManager` for it. The `HistoryManager` constructor creates the `history/` directory if it does not exist.
+2. **Retention cleanup.** On each run, the app calls a cached function that runs the retention cleanup at most once per hour per server process. It removes stale history and feedback files (see [Retention cleanup](#retention-cleanup)).
+3. **Document upload.** When a document is uploaded, the app loads up to `HISTORY_LIMIT` past entries for that document name from disk and prepends them to `chat_history`. A set named `loaded_docs` makes sure this happens only once per document in a session.
+4. **Question answered.** The chat handler runs the Hybrid query. If `response_status` is `"success"`, the cost tracker is charged and `log_to_history()` is called.
+5. **Logging.** `log_to_history()` builds an entry with an ISO 8601 timestamp, the question, the raw answer, the mode, the document name, and a `metrics` object. It appends the entry to `chat_history` first and then calls `HistoryManager.add_question()`, which appends it to the session file. A failure while writing to disk is printed and does not stop the UI.
+6. **Display.** `render_chat_history()` keeps only the entries whose `document_name` matches the current upload and renders them as chat bubbles. The per-document aggregate metrics block reads the same data from disk through `get_recent_questions()`.
+7. **Reading.** `load_session_history()` reads the whole file and returns it sorted newest first. `get_recent_questions()` applies an optional document filter and a limit to that result.
 
-1. **Concurrent users in different browser sessions:**
-   - Separate `st.session_state` objects (Streamlit enforces)
-    - Unique temporary upload filenames removed immediately after extraction
-   - Separate history JSON files (`user_session1.json`, `user_session2.json`)
-   - No data leakage between users
+### Stored entry format
 
-2. **Document isolation within and across sessions:**
-   - Each upload creates a new session-local temp file
-   - Document names are stored with questions for filtering
-   - Another user's upload of "contract.pdf" doesn't interfere
+Each entry in `history/user_{session_id}.json` has these keys:
 
-3. **Cleanup safety:**
-   - Cleanup only touches files with old mtime (>30 days)
-   - Doesn't affect active sessions (newer mtime)
-   - No race conditions between concurrent users
+- `timestamp`: local time in ISO 8601 format
+- `question`, `answer`, `mode`, `document_name`
+- `metrics`: `total_seconds`, `retrieval_seconds`, `generation_seconds`, `chunk_count`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `temperature`, `langsmith_run_id`, `picture_description_used`
 
-4. **Admin/CLI access:**
-   - Server admin can inspect all history via CLI
-   - Filesystem permissions control access
-   - Good for auditing and performance analytics
+The file is a JSON array in append order, so the oldest entry is first.
 
----
+## Session Isolation
 
-## Future Enhancements
+- Each browser session has its own `st.session_state`, its own `HistoryManager`, and its own file.
+- A refresh or a new browser window creates a new session ID and therefore a new, empty history. Old files remain on disk until cleanup removes them.
+- Concurrent sessions never write to the same file.
+- Cleanup removes whole files, so it does not change any other session's data.
 
-1. **History export/download button** in sidebar (CSV for individual session)
-2. **History search** — filter by keyword in question or answer
-3. **User authentication** (optional) — ties real usernames to sessions
-4. **Analytics dashboard** — token usage trends, most-asked questions, mode performance
-5. **History compression** — gzip old session files to save disk space
-6. **Sync to cloud** (optional) — backup history to S3/Google Drive
+## Document Filtering
 
----
+- Questions from all documents in a session are stored together.
+- The chat view, the aggregate metrics, and the restore step all filter by `document_name`.
+- The sidebar is not used for history. `render_history_sidebar()` is a placeholder that does nothing.
 
-## Performance Considerations
+## Retention Cleanup
 
-- **JSON file I/O:** Append-only writes; no file locks needed
-- **Sidebar rendering:** Filters history on each rerun (O(n) where n = total questions in session)
-- **Cleanup task:** Runs once at startup; linear scan of history/ folder
-- **Multi-user overhead:** Each session has its own HistoryManager; no global state contention
+`HistoryManager.cleanup_old_sessions(retention_days)` scans `history/` and processes files whose names start with `user_`:
 
-For high-volume usage, consider:
-- Pagination in sidebar (show last 10, load older on demand)
-- Index file (session_id → file path) for faster cleanup
-- Eventual migration to SQLite for large history volumes
+- Files that contain an empty list are deleted.
+- Files that cannot be read or parsed as JSON are skipped.
+- Files whose first entry has a timestamp older than the cutoff are deleted.
 
----
+The web app runs this from a function decorated with `st.cache_resource(ttl=3600)`, so the directory scan happens at most once per hour per server process instead of on every rerun. The same function also runs feedback cleanup with `FEEDBACK_RETENTION_DAYS` (see [STEP_8_FEEDBACK_COLLECTION.md](STEP_8_FEEDBACK_COLLECTION.md)).
 
-## Integration with Existing Modules
+## Error Handling and Fallbacks
 
-- **`app_pages/home.py`** — UI integration point; calls HistoryManager after successful queries
-- **`pipeline.py`** — No changes needed; metrics already available in result dict
-- **`ai_query.py`** — No changes needed; metrics already in return dict
-- **`ingest.py`**, **`preprocess.py`**, **`embed_index.py`**, **`prompt_loader.py`** — No changes needed
+- **Corrupt or unreadable session file.** `_load_json()` returns an empty list, so the app keeps running. The next save then replaces the file with only the new entry. See Limitations.
+- **Disk write failure.** `_save_json()` catches `IOError` and prints a message. The entry remains in `chat_history` for the current session.
+- **Unexpected errors while logging.** `log_to_history()` catches all exceptions, prints the traceback to stderr, and returns, so the chat answer is still shown.
+- **History disabled.** With `HISTORY_ENABLED=false`, logging, restore, aggregate metrics, and cleanup are all skipped. The `HistoryManager` object is still created, and the `history/` directory is still created.
+- **Failed or simulated answers.** These are not logged, charged, or stored.
 
----
+## Configuration
 
-## Testing Checklist
+| Variable | Default | Effect |
+|---|---|---|
+| `HISTORY_ENABLED` | `true` | Enables logging, restore, aggregate metrics, and cleanup. Accepts `true`, `1`, or `yes` (case-insensitive). |
+| `HISTORY_RETENTION_DAYS` | `30` | Age in days after which a session file is deleted during cleanup. |
+| `HISTORY_LIMIT` | `10` | Maximum number of entries loaded from disk per document and used for aggregate metrics. |
 
-- [ ] `src/history_manager.py` created with all methods
-- [x] `app_pages/home.py` initializes HistoryManager with a random session UUID
-- [ ] Cleanup called on app startup
-- [x] Successful Hybrid answers are logged; simulated and failed responses are excluded
-- [ ] Sidebar renders and filters by current document
-- [ ] Click sidebar question loads it into input field
-- [ ] Multiple documents in one session filter correctly
-- [ ] Multiple browser sessions don't interfere
-- [ ] Browser close/refresh starts new session
-- [ ] Old sessions cleaned up after 30 days
-- [ ] `history_cli.py` lists, filters, exports correctly
-- [ ] `HISTORY_ENABLED=false` disables feature completely
-- [ ] JSON file structure matches specification
-- [ ] Timestamps in ISO 8601 format
-- [ ] All metrics fields present and accurate
+These are listed in `.env.example`. On Streamlit Cloud, set them in the app secrets (see [STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md](STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md)).
 
----
+## Command-Line Tool
 
-## Next Steps (After Implementation)
+`src/history_cli.py` works on the same files. Run it from the repository root:
 
-1. Test thoroughly with multiple concurrent users
-2. Monitor disk usage; plan cleanup strategy for long-running deployments
-3. Consider metrics collection/analytics dashboard
-4. Optionally add user authentication for more granular access control
-5. Plan for history export/sharing features
+```powershell
+python -m src.history_cli list --document contract.pdf
+```
+
+Subcommands:
+
+- `list [--session ID] [--document NAME]` prints entries grouped by session, with their index in file order.
+- `show --session ID --index N` prints the full question, answer, and metrics for one entry.
+- `export [--output FILE] [--session ID] [--document NAME]` writes a CSV file (default `history_export.csv`) with the timestamp, session ID, document, mode, question, answer, and the metric fields listed above, except `langsmith_run_id` and `picture_description_used`.
+- `cleanup [--days N]` runs the same cleanup as the web app, with a default of 30 days.
+
+`--session` takes the bare session ID (the hexadecimal part of the file name), not the `user_` prefix. `show` uses the index in file order, which is the same order that `list` prints.
+
+## Testing
+
+Run the history tests from the repository root:
+
+```powershell
+python -m test_src.test_history
+```
+
+The script removes its own test files before and after the run. It covers:
+
+- add and load of a single entry,
+- ordering of several entries (newest first),
+- document filtering and the limit on `get_recent_questions()`,
+- isolation between two session IDs,
+- a Streamlit `AppTest` check that two app sessions get different session IDs,
+- the JSON structure and ISO 8601 timestamps,
+- cleanup of old session files,
+- atomic writes that leave the original file intact when serialization fails.
+
+Browser behavior (restore on re-upload, switching documents, refresh) is checked by hand. Manual checks:
+
+- ask a question, refresh the browser, and confirm a new session starts with no history,
+- upload a second document and confirm the chat view shows only that document's questions,
+- run `python -m src.history_cli list` and confirm the entries appear.
+
+## Limitations
+
+- **Sidebar panel not implemented.** The chat view is the only in-app display of history.
+- **Display order.** `render_chat_history()` iterates `reversed(chat_history)`, so the most recent turn of the current session is shown first. Entries restored from disk are placed before the in-session entries and are shown oldest first after the session turns. The order is not strictly chronological after a restore.
+- **Retention uses the first entry in the file.** Because the file is in append order, the first entry is the oldest. A session is deleted when its oldest entry is past the cutoff, even if later entries are recent.
+- **Corrupt file is overwritten.** If a session file cannot be parsed, it is treated as empty and the next save replaces it.
+- **No locking across processes.** Each session writes only its own file, but the CLI and the web app can read a file at the same time as it is replaced. The atomic write prevents partial files, not lost updates from parallel writers.
+- **Deployment storage.** Files live on the server's local disk and are not durable across Streamlit Cloud instance replacement.
+- **Scale.** Each save rewrites the full session file. This is fine for typical session sizes, but a database would be needed for high volume.
+
+## Related Files
+
+| File | Purpose |
+|---|---|
+| [src/history_manager.py](../src/history_manager.py) | `HistoryManager`: file I/O, filtering, cleanup |
+| [src/history_cli.py](../src/history_cli.py) | Command-line list, show, export, and cleanup |
+| [src/json_io.py](../src/json_io.py) | `write_json_atomic()` used for every save |
+| [app_pages/home.py](../app_pages/home.py) | Session setup, logging, restore, chat display, cleanup scheduling |
+| [src/gdpr_compliance.py](../src/gdpr_compliance.py) | Export and deletion of a session's history on request |
+| [test_src/test_history.py](../test_src/test_history.py) | History tests |
+| [.env.example](../.env.example) | Example values for the history variables |
+
+## Related
+
+- [STEP_4_AI_QUERY.md](STEP_4_AI_QUERY.md): source of `response_status` and the answer fields that are logged
+- [STEP_5_PIPELINE.md](STEP_5_PIPELINE.md): source of the timing, retrieval, and token metrics
+- [STEP_8_FEEDBACK_COLLECTION.md](STEP_8_FEEDBACK_COLLECTION.md): feedback is stored per session and shares the cleanup schedule
+- [STEP_10_COST_TRACKING.md](STEP_10_COST_TRACKING.md): cost is charged only for logged successful answers
+- [STEP_11_GDPR_COMPLIANCE.md](STEP_11_GDPR_COMPLIANCE.md): export and deletion of a session's history
+- [STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md](STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md): environment and secrets for the history variables

@@ -1,340 +1,110 @@
-# Step 10: Cost Tracking & Budget Management
+# Step 10: Cost Tracking and Budget Management
 
-## Overview
+Status: Implemented
 
-**Cost Tracking** is a session-local estimate based on token usage and the fixed rates configured
-in `src/cost_tracker.py`. It enforces the app's internal usage limit; the provider dashboard is the
-authoritative source for actual billing.
+## Goal
 
-**Purpose:**
-- Provide transparent cost visibility to users
-- Prevent budget overruns on free tier ($0.50 USD per session)
-- Estimate usage with the project's fixed Grok-based pricing constants
-- Gracefully handle budget exhaustion without data loss
+Step 10 gives users a visible estimate of how much of the free testing allowance a session has used, and stops new questions once that allowance is exhausted. The allowance is a fixed $0.50 USD per browser session. The figures are an internal estimate based on token counts and fixed rates. They are not a billing record; the LLM provider's dashboard remains the authoritative source for actual charges.
 
-**Status:** ✅ FULLY IMPLEMENTED (2026-08-25)
+## Design Decisions
 
----
+- **Session-local state.** The tracker lives in `st.session_state` under the key `llm_cost_tracker`. Nothing is written to disk, so each new browser session starts with a fresh budget. This is deliberate for the free testing trial.
+- **Fixed, provider-independent rates.** The rates are constants in the cost tracker module and are not read from `LLM_MODEL` or the configured provider. They are described in the code as placeholder estimates until per-provider pricing is implemented.
+- **Only real answers are charged.** Costs are added only when a query returns `response_status == "success"`. Simulated answers and provider failures are never charged, stored in history, or rated.
+- **Enforcement at the page level.** When the budget is exhausted, the Home page stops rendering before the chat input, so no further question can be submitted.
+- **Module-level helpers, no class.** The tracker is a set of functions over one session-state dictionary, which keeps the Streamlit page code short.
 
-## Architecture
+## Pricing Constants
 
-### Module: `src/cost_tracker.py`
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `ASSUMED_INPUT_COST_PER_1K` | 0.03 | USD per 1,000 prompt tokens |
+| `ASSUMED_OUTPUT_COST_PER_1K` | 0.10 | USD per 1,000 completion tokens |
+| `FREE_BUDGET_USD` | 0.50 | Budget per session |
+| `WARNING_THRESHOLD` | 0.80 | Warning shown at 80% of budget |
+| `BLOCK_THRESHOLD` | 1.00 | Defined in the module, but blocking is currently triggered by `track_query_cost()` when the total reaches `FREE_BUDGET_USD` |
 
-**Core Responsibilities:**
-1. Calculate query costs based on token consumption
-2. Accumulate costs per session
-3. Provide budget enforcement (warnings & blocking)
-4. Export cost data for GDPR compliance
+The cost of one query is `(prompt_tokens / 1000) * 0.03 + (completion_tokens / 1000) * 0.10`. For example, 1,500 prompt tokens and 200 completion tokens cost about $0.065, so the default budget covers roughly 25 such questions. The same arithmetic applies to picture-interpretation calls (see [STEP 12](STEP_12_PICTURE_INTERPRETATION.md)).
 
-**Key Functions:**
+## How the Flow Works
 
-| Function | Purpose | Returns |
-|----------|---------|---------|
-| `initialize_cost_tracker()` | Initialize session state for cost tracking | None |
-| `calculate_query_cost(prompt_tokens, completion_tokens)` | Calculate USD cost for a query | float (cost_usd) |
-| `track_query_cost(prompt_tokens, completion_tokens)` | Add query cost to session total | float (new_total) |
-| `get_session_cost()` | Get cumulative session cost | float (total_usd) |
-| `get_remaining_budget()` | Get remaining budget | float (usd) |
-| `get_budget_percentage()` | Get usage as percentage (0-100) | float |
-| `should_warn()` | Check if 80% threshold reached | bool |
-| `is_blocked()` | Check if budget exhausted (100%) | bool |
-| `get_cost_badge()` | Get formatted display string | str (e.g., "💚 Cost: 24%") |
-| `export_cost_data()` | Export for GDPR compliance | dict |
+1. **Initialization.** On each run, the Home page calls `initialize_cost_tracker()`. This creates the session dictionary (total cost, query count, query log, blocked flag) only if it does not already exist.
+2. **Budget display.** Before the chat area, the page shows a budget notice, a link to the feedback form, and a cost badge. The badge shows the percentage of budget used, with a green, warning, or stop emoji depending on the level. The feedback link is hidden once the budget is blocked.
+3. **Warning.** When the usage percentage reaches 80% and the budget is not yet blocked, the page shows a "nearly complete" warning.
+4. **Charging a query.** After a Hybrid-mode answer, the page checks `response_status`. Only on `success` does it call `track_query_cost()` with the prompt and completion token counts. That call computes the cost, updates the total and count, appends an entry to the query log (timestamp, tokens, cost), and sets `blocked` once the total reaches $0.50.
+5. **Picture interpretation.** When multimodal picture interpretation runs during upload, its aggregated prompt and completion tokens are also charged through the same function, provided the counts are non-zero.
+6. **Blocking.** On the next run, `is_blocked()` returns `True`. The page shows a trial-complete message and a feedback link, then stops rendering. The chat input is not shown.
 
-### Pricing Configuration
+Because the page re-evaluates these checks on every rerun, the badge and warning update immediately after each answer.
 
-**Grok LLM Rates (per 1,000 tokens):**
-```python
-GROK_INPUT_COST_PER_1K = 0.03    # $0.03 per 1K input tokens
-GROK_OUTPUT_COST_PER_1K = 0.10   # $0.10 per 1K output tokens
-FREE_BUDGET_USD = 0.50            # $0.50 per session
+## Token Counts
+
+Token counts come from `generate_answer_with_meta()` in [src/ai_query.py](../src/ai_query.py). The provider's `usage` values are used when present. If the provider omits them (reported as zero), the code uses a rough estimate of about four characters per token and marks the result as estimated. Failed provider calls return zero tokens. Simulated answers (no API configuration) use the same estimate but are not charged because their status is not `success`.
+
+## Session State
+
+The dictionary stored under `llm_cost_tracker` has these keys:
+
+- `total_cost_usd`: cumulative estimated spend
+- `queries_count`: number of charged queries
+- `queries`: list of entries with `timestamp`, `prompt_tokens`, `completion_tokens`, and `cost_usd`
+- `blocked`: whether the budget has been exhausted
+
+Helper functions also expose the remaining budget, the usage percentage, and a detailed breakdown. The `reset_cost_tracker()` function can clear the dictionary, but no page currently calls it.
+
+## Configuration
+
+Cost tracking has no environment variables. The rates and budget are code constants in [src/cost_tracker.py](../src/cost_tracker.py). Changing them requires a code change and redeploy.
+
+## Error Handling and Fallbacks
+
+- A failed or unconfigured LLM call never reaches the tracker, so users are not charged for errors.
+- If the Hybrid path returns a non-success status, the answer is not logged to history and no feedback is attached.
+- Budget checks rely only on session state, so they do not depend on external services.
+- In the GDPR export, cost data is read inside a `try` block. A failure there is logged and the rest of the export still runs.
+
+## Privacy and GDPR
+
+The GDPR export ([src/gdpr_compliance.py](../src/gdpr_compliance.py)) includes a `cost_tracking` section with total cost, remaining budget, budget percentage, and query count. The export also records a hard-coded budget limit of $0.50. Cost data is not stored on the server, so it disappears when the browser session ends. The Google Forms feedback link opens in a new tab and is not connected to the local feedback storage.
+
+## Internationalization
+
+The budget notice, warning, and blocked messages are translated through [src/i18n.py](../src/i18n.py). The current translations cover English and Romanian only. The budget notice states the approximate number of questions for a 100-page document.
+
+## Tests
+
+Run the tests from the repository root:
+
+```powershell
+python -m test_src.test_ai_query
 ```
 
-**Calculation Formula:**
-```
-cost = (input_tokens / 1000 * 0.03) + (completion_tokens / 1000 * 0.10)
-```
+- `test_streamlit_budget_limit_blocks_chat_input` in [test_src/test_ai_query.py](../test_src/test_ai_query.py) loads the app with Streamlit's `AppTest`, sets the tracker to a blocked state, and checks that the trial-complete message, the feedback link, and the absence of chat input are shown.
 
-**Example (100-page document):**
-- Input: 1,500 tokens (prompt + context)
-- Output: 200 tokens (answer)
-- Cost: (1500/1000 * 0.03) + (200/1000 * 0.10) = $0.065 per query
-- Budget: $0.50 ÷ $0.065/query ≈ **25 questions**
+No dedicated unit test exists for the arithmetic in `calculate_query_cost()` or `track_query_cost()`. Those functions are verified only indirectly.
 
----
+Manual check: open the app, ask several questions, confirm the badge and warning appear near 80%, and confirm questions are blocked at 100%.
 
-## Integration Points
+## Limitations
 
-### 1. Home Page (`app_pages/home.py`)
+- **Estimate only.** Rates are fixed placeholders and do not match any specific provider or model. Actual billing can differ.
+- **Per-session budget.** Users can open a new session to get a new budget. There is no account-level or server-side limit.
+- **No paid tier.** The app has no mechanism to raise the limit.
+- **Approximate token estimates.** The four-characters-per-token fallback is rough, especially for non-English text.
+- **Reset is not wired.** `reset_cost_tracker()` exists but no UI path calls it.
 
-**Initialization:**
-```python
-from src.cost_tracker import initialize_cost_tracker
-initialize_cost_tracker()  # Called on app startup
-```
+## Related Files
 
-**Cost Display (after page title):**
-```python
-st.info(translate("budget_info"))  # "Try for FREE: ~25 questions on ~100 page document..."
-col1, col2 = st.columns([3, 1])
-with col2:
-    st.markdown(get_cost_badge())  # Shows: 💚 Cost: 24%
-```
+- [src/cost_tracker.py](../src/cost_tracker.py): tracker logic and constants
+- [app_pages/home.py](../app_pages/home.py): initialization, badge, warning, blocking, and charging
+- [src/ai_query.py](../src/ai_query.py): token metadata and response status
+- [src/gdpr_compliance.py](../src/gdpr_compliance.py): cost data in the data export
+- [src/i18n.py](../src/i18n.py): budget messages
+- [test_src/test_ai_query.py](../test_src/test_ai_query.py): budget-blocking test
 
-**Warning/Blocking Logic:**
-```python
-if should_warn() and not is_blocked():
-    st.warning("Free testing trial nearly complete: You are approaching the trial limit...")
+## Related
 
-if is_blocked():
-    st.error("Free testing trial complete: Your free testing trial has ended...")
-    st.link_button("Share feedback", FEEDBACK_FORM_URL)
-    st.stop()
-```
-
-The same Google Forms link is shown beside the usage indicator before the limit is reached. It
-opens in a new tab, so users may provide feedback at any point without interrupting their session.
-Google Forms responses are not written to the app's local `FeedbackManager` storage.
-
-**Cost Tracking on Query:**
-```python
-result = run_hybrid(...)  # Get answer from LLM
-
-# Only successful provider responses are tracked.
-if result.get("response_status") == "success":
-    track_query_cost(
-        prompt_tokens=result.get("prompt_tokens", 0),
-        completion_tokens=result.get("completion_tokens", 0),
-    )
-```
-
-### 2. AI Query (`src/ai_query.py`)
-
-**Token Extraction:**
-The `generate_answer_with_meta()` function returns metadata including:
-- `prompt_tokens`: Input token count
-- `completion_tokens`: Output token count
-- `total_tokens`: Sum of both
-
-This data is passed through the result dict to `app_pages/home.py`.
-
-### 3. GDPR Compliance (`src/gdpr_compliance.py`)
-
-**Data Export:**
-Cost data is included in user data exports:
-```python
-cost_data = export_cost_data()  # From cost_tracker.py
-user_export["data"]["cost_tracking"] = {
-    "total_cost_usd": cost_data.get("total_cost_usd"),
-    "budget_percentage": cost_data.get("budget_percentage"),
-    "queries_count": cost_data.get("queries_count"),
-}
-```
-
-### 4. Internationalization (`src/i18n.py`)
-
-**Budget Info Translation:**
-All 5 supported languages have `budget_info` translation:
-```
-"en": "Try for FREE: you can ask ~25 questions on a ~100 page document..."
-"ro": "Încearcă gratuit: poți pune ~25 de întrebări pe un document de ~100 de pagini..."
-"fr": "Essayez gratuitement: vous pouvez poser ~25 questions sur un document de ~100 pages..."
-"es": "Prueba gratis: puedes hacer ~25 preguntas en un documento de ~100 páginas..."
-"de": "Kostenlos testen: Du kannst ~25 Fragen zu einem ~100-seitigen Dokument stellen..."
-```
-
----
-
-## Session State Storage
-
-**Key:** `"llm_cost_tracker"`
-
-**Structure:**
-```python
-{
-    "total_cost_usd": 0.245,              # Cumulative spend
-    "queries_count": 4,                   # Questions asked
-    "queries": [                          # Detailed log
-        {
-            "timestamp": "2026-08-25T10:30:45.123456",
-            "prompt_tokens": 1500,
-            "completion_tokens": 200,
-            "cost_usd": 0.065,
-        },
-        ...
-    ],
-    "blocked": False,                     # Budget exhausted?
-}
-```
-
-**Persistence:**
-- Lives in `st.session_state` (Streamlit browser session only)
-- NOT persisted to disk (resets on new session)
-- This is intentional: users get fresh $0.50 budget on each session
-
----
-
-## User Experience Flow
-
-### 1. First Visit
-```
-User opens app
-    ↓
-Session initializes with $0.50 budget
-    ↓
-App displays: "Try for FREE: ~25 questions on ~100 page doc"
-    ↓
-Cost badge shows: 💚 Cost: 0%
-```
-
-### 2. Asking Questions (Normal)
-```
-User asks a question
-    ↓
-LLM processes (e.g., 1500 prompt tokens, 200 output tokens)
-    ↓
-Cost calculated: $0.065
-    ↓
-Cost badge updates: 💚 Cost: 13% ($0.065 / $0.50)
-    ↓
-User sees answer + chat history
-```
-
-### 3. Approaching Limit (80% Warning)
-```
-User asks another question
-    ↓
-Total cost now: $0.42 (84% of $0.50)
-    ↓
-Cost badge turns yellow: ⚠️ Cost: 84%
-    ↓
-Warning banner appears: "⚠️ Budget Warning: 80% of budget used"
-    ↓
-User can still ask 1-2 more questions
-```
-
-### 4. Budget Exhausted (100% Blocking)
-```
-User asks another question, total would be $0.51
-    ↓
-Cost tracker detects: 100% budget exceeded
-    ↓
-Cost badge turns red: 🛑 Cost: 102%
-    ↓
-Trial-complete message and Google Forms link appear
-    ↓
-User can open the optional feedback form in a new tab
-    ↓
-app.stop() → in code this is `st.stop()` — the chat input is not rendered and no more questions are allowed
-```
-
----
-
-## Testing Methods
-
-### Unit Tests: Token Cost Calculation
-```python
-from src.cost_tracker import calculate_query_cost
-
-# Test: 1500 input + 200 output tokens
-cost = calculate_query_cost(1500, 200)
-assert cost == (1.5 * 0.03) + (0.2 * 0.10)  # $0.065
-```
-
-### Integration Test: Session Tracking
-```python
-import streamlit as st
-from src.cost_tracker import track_query_cost, get_session_cost, should_warn
-
-# Simulate 8 queries (typical budget for 100-page doc)
-for i in range(8):
-    track_query_cost(1500, 200)
-
-cost = get_session_cost()
-assert cost == 8 * 0.065  # $0.52
-assert should_warn()  # 104% > 80%
-```
-
-### Manual Testing: Web App
-1. Open app, confirm budget info displays
-2. Upload 100-page PDF, ask 5-10 questions
-3. Watch cost badge update in real-time
-4. Reach ~80% and confirm warning appears
-5. Reach 100% and confirm app blocks new questions
-
----
-
-## Cost Model Assumptions
-
-**For 100-page document:**
-
-| Metric | Estimate | Rationale |
-|--------|----------|-----------|
-| Pages | ~100 | Medium-length document |
-| Tokens/page | 300-500 | ~150 words/page avg |
-| Total doc tokens | 30k-50k | Full text extraction |
-| Avg prompt size | 1,500 tokens | Includes question + retrieved chunks |
-| Avg output size | 200 tokens | ~150-word answer |
-| Cost/query | $0.020-0.025 | Based on Grok pricing |
-| **Questions in budget** | **~25** | $0.50 ÷ $0.020 |
-
-**For smaller documents (10 pages):**
-- Avg prompt: 500 tokens (less context needed)
-- Avg output: 150 tokens
-- Cost/query: ~$0.018
-- Questions: ~28 (slightly more)
-
-**For larger documents (500+ pages):**
-- Avg prompt: 3,000+ tokens (more context)
-- Avg output: 300 tokens
-- Cost/query: ~$0.12
-- Questions: ~4 (significantly fewer)
-
----
-
-## Limitations & Edge Cases
-
-### 1. Token Count Accuracy
-- Uses provider token counts when available
-- Falls back to a rough character-based estimate when a successful response omits usage data
-- Configured provider failures return zero tokens and are not added to the app's usage tracker
-
-### 2. Fallback Behavior
-- Missing provider configuration produces a labeled simulation that is not tracked
-- Configured provider failures are not tracked or saved as answers
-- Successful responses without usage metadata are tracked using estimated token counts
-
-### 3. No Persistent Storage
-- Cost data resets on new browser session
-- Intentional: each user gets independent $0.50 budget
-- For multi-user analytics, export data via GDPR endpoint
-
-### 4. No Upgrade Path
-- Free tier is $0 (no paid tiers implemented yet)
-- Users can only restart session for fresh budget
-- Future: implement paid tier to lift budget limits
-
----
-
-## Future Enhancements
-
-- [ ] Support multiple LLM providers (OpenAI, Groq, Claude)
-- [ ] Persistent usage analytics (opt-in)
-- [ ] Paid tier with higher budgets ($10, $50, unlimited)
-- [ ] Budget presets (conservative, balanced, aggressive)
-- [ ] Cost alerts via email
-- [ ] Usage reports & forecast graphs
-- [ ] Family/team budget pooling
-
----
-
-## References
-
-- **Grok Pricing:** https://x.ai/pricing
-- **Token Counting:** OpenAI GPT tokenizer documentation
-- **GDPR Right to Erasure:** Data deleted on session end
-- **Related Files:**
-  - `src/cost_tracker.py` — Implementation
-    - `app_pages/home.py` — Integration & display
-  - `src/gdpr_compliance.py` — Data export integration
-  - `src/i18n.py` — Budget info translations
+- [STEP 4: AI Query](STEP_4_AI_QUERY.md): the LLM call that produces token counts
+- [STEP 5: Pipeline](STEP_5_PIPELINE.md): the Hybrid flow that returns the result dictionary
+- [STEP 11: GDPR Compliance](STEP_11_GDPR_COMPLIANCE.md): data export that includes cost data
+- [STEP 12: Picture Interpretation](STEP_12_PICTURE_INTERPRETATION.md): vision calls that are also charged

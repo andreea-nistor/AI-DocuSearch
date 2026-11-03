@@ -3,7 +3,7 @@
 **Last updated:** September 15, 2026
 
 AI DocuSearch relies on external services for language-model responses, optional diagnostics,
-language detection, feedback collection, and hosting. The service used in a particular deployment
+feedback collection, and hosting. The service used in a particular deployment
 depends on the operator's configuration and the feature you choose to use.
 
 Do not upload confidential, regulated, or sensitive documents to a testing deployment unless you
@@ -52,16 +52,6 @@ the in-app **Delete Data** control.
 - Provider: Google LLC
 - Privacy information: https://policies.google.com/privacy
 
-## IP Geolocation
-
-AI DocuSearch may contact `ip-api.com` from the application server to infer a country for automatic
-language selection. Depending on the hosting environment, the service may receive the server's IP
-address rather than the individual user's address. Detection may be unavailable and the application
-then defaults to English.
-
-- Provider: ip-api.com
-- Privacy information: https://ip-api.com/docs/legal
-
 ## Hosting and Infrastructure
 
 The deployed application and its temporary session data are processed by the hosting provider,
@@ -74,8 +64,8 @@ metadata are governed by the provider's terms and privacy practices.
 
 - Using the AI question feature requires sending relevant content to the configured model provider.
 - Opening and submitting the Google feedback form is optional.
-- LangSmith tracing and IP geolocation are controlled by deployment configuration, not by an
-  in-app user setting.
+- LangSmith tracing is controlled by deployment configuration, not by an in-app user setting.
+- The interface language is chosen by you on the start screen; it is not inferred from your IP address.
 - The application does not sell your data or share it with advertisers.
 - See the Privacy Policy for retention, deletion, and data-rights information.
 

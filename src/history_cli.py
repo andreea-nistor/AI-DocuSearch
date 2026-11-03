@@ -2,10 +2,10 @@
 History CLI tool for inspection, analytics, and batch operations on session history.
 
 Usage:
-    python history_cli.py list [--session SESSION_ID] [--document DOCUMENT_NAME]
-    python history_cli.py show --session SESSION_ID --index INDEX
-    python history_cli.py export [--output OUTPUT_FILE] [--session SESSION_ID] [--document DOCUMENT_NAME]
-    python history_cli.py cleanup [--days RETENTION_DAYS]
+    python -m src.history_cli list [--session SESSION_ID] [--document DOCUMENT_NAME]
+    python -m src.history_cli show --session SESSION_ID --index INDEX
+    python -m src.history_cli export [--output OUTPUT_FILE] [--session SESSION_ID] [--document DOCUMENT_NAME]
+    python -m src.history_cli cleanup [--days RETENTION_DAYS]
 """
 
 import argparse
@@ -197,11 +197,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python history_cli.py list
-  python history_cli.py list --document contract.pdf
-  python history_cli.py show --session abc123 --index 0
-  python history_cli.py export --output history.csv
-  python history_cli.py cleanup --days 30
+  python -m src.history_cli list
+  python -m src.history_cli list --document contract.pdf
+  python -m src.history_cli show --session abc123 --index 0
+  python -m src.history_cli export --output history.csv
+  python -m src.history_cli cleanup --days 30
         """
     )
     

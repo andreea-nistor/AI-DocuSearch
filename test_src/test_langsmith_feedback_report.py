@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from typing import Iterator, Sequence
 from uuid import UUID, uuid4
 
-from langsmith_feedback_report import collect_feedback_records, main
+from src.langsmith_feedback_report import collect_feedback_records, main
 
 
 def utc(day: int) -> datetime:

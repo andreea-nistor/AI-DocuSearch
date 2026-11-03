@@ -2,7 +2,7 @@
 """
 Test suite for feedback collection functionality
 
-Run with: python test_feedback.py
+Run with: python -m test_src.test_feedback
 """
 
 import json
@@ -277,7 +277,9 @@ def test_streamlit_feedback_buttons():
     """Test that both chat feedback buttons persist complete rating records."""
     from streamlit.testing.v1 import AppTest
 
-    app = AppTest.from_file("web_app.py", default_timeout=30)
+    app = AppTest.from_file(Path(__file__).resolve().parent.parent / "web_app.py", default_timeout=30)
+    app.session_state["user_language"] = "en"
+    app.session_state["user_language_chosen"] = True
     app.session_state["gdpr_consent_given"] = True
     app.run()
 

@@ -107,7 +107,7 @@ from src.visual_ingest import (
     is_visual_source,
     multimodal_enabled,
 )
-from src.i18n import translate, get_user_language
+from src.i18n import translate, show_language_selector
 from src.gdpr_compliance import show_consent_banner, show_gdpr_footer
 from src.cost_tracker import initialize_cost_tracker, get_cost_badge, should_warn, is_blocked, track_query_cost
 from src.feedback_manager import FeedbackManager
@@ -199,15 +199,16 @@ _run_retention_cleanup_once_per_hour()
 # Check if on mobile
 is_mobile = is_mobile_browser()
 
+# Language choice (English / Română) comes first; the consent notice is then shown in that language
+if not show_language_selector():
+    st.stop()
+
 # Show GDPR consent banner (must be accepted to continue)
 if not show_consent_banner():
     st.stop()
 
 if is_mobile:
-    st.info(
-        "📱 **Mobile Device Detected**: Hybrid mode intelligently adapts to your device's capabilities. "
-        "It will use fast, efficient processing optimized for mobile."
-    )
+    st.info(translate("mobile_detected"))
 
 st.title(translate("title"))
 st.markdown(translate("description"))
@@ -219,34 +220,27 @@ col1, col2 = st.columns([3, 1])
 with col1:
     if not budget_blocked:
         st.link_button(
-            "Share feedback",
+            translate("share_feedback"),
             FEEDBACK_FORM_URL,
             icon=":material/rate_review:",
-            help="Open the AI DocuSearch testing feedback form in a new tab.",
+            help=translate("share_feedback_help"),
         )
 with col2:
     st.markdown(get_cost_badge())
 
 # Show warning if approaching budget limit
 if should_warn() and not budget_blocked:
-    st.warning(
-        "**Free testing trial nearly complete:** You are approaching the trial limit. "
-        "Only a small amount of usage remains."
-    )
+    st.warning(translate("trial_nearly_complete"))
 
 # Show blocking message if budget exceeded
 if budget_blocked:
-    st.error(
-        "**Free testing trial complete:** Your free testing trial has ended. "
-        "Please share your experience using the form below. Your feedback will help improve "
-        "AI DocuSearch and is greatly appreciated."
-    )
+    st.error(translate("trial_complete"))
     st.link_button(
-        "Share feedback",
+        translate("share_feedback"),
         FEEDBACK_FORM_URL,
         type="primary",
         icon=":material/rate_review:",
-        help="Open the AI DocuSearch testing feedback form in a new tab.",
+        help=translate("share_feedback_help"),
     )
     st.stop()
 
@@ -314,27 +308,6 @@ def _is_rag_inconclusive(answer: str) -> bool:
         "nu am gasit",
         "nu este mentionat",
         "nu se specifica",
-        # French patterns
-        "ne fournit pas",
-        "ne contient pas",
-        "non trouvé",
-        "n'a pas trouvé",
-        "ne contient aucune",
-        "pas spécifié",
-        # Spanish patterns
-        "no proporciona",
-        "no contiene",
-        "no encontrado",
-        "no encontré",
-        "no se especifica",
-        "no menciona",
-        # German patterns
-        "liefert nicht",
-        "enthält nicht",
-        "nicht gefunden",
-        "nicht gefunden",
-        "nicht angegeben",
-        "nicht erwähnt",
     ]
     return any(pattern in answer_lower for pattern in inconclusive_patterns)
 
@@ -385,35 +358,36 @@ def render_metrics(result: dict):
     """Render metrics with responsive layout (2 cols on mobile, 4 on desktop)."""
     num_cols = 2 if is_mobile else 4
     cols = st.columns(num_cols)
-    cols[0].metric("Total time", f"{result['total_seconds']:.2f}s")
-    cols[1].metric("Chunks used", result["chunk_count"])
+    cols[0].metric(translate("metric_total_time"), f"{result['total_seconds']:.2f}s")
+    cols[1].metric(translate("metric_chunks_used"), result["chunk_count"])
     if num_cols == 4:
-        cols[2].metric("Context size", f"{result['context_chars']:,} chars")
-        tok_label = "Tokens (est.)" if result["estimated_tokens"] else "Tokens (actual)"
+        cols[2].metric(translate("metric_context_size"), f"{result['context_chars']:,} chars")
+        tok_label = translate("metric_tokens_est") if result["estimated_tokens"] else translate("metric_tokens_actual")
         cols[3].metric(tok_label, f"{result['total_tokens']:,}")
     else:
         # On mobile, show in second row
-        cols[0].metric("Context size", f"{result['context_chars']:,} chars")
-        tok_label = "Tokens (est.)" if result["estimated_tokens"] else "Tokens (actual)"
+        cols[0].metric(translate("metric_context_size"), f"{result['context_chars']:,} chars")
+        tok_label = translate("metric_tokens_est") if result["estimated_tokens"] else translate("metric_tokens_actual")
         cols[1].metric(tok_label, f"{result['total_tokens']:,}")
 
-    with st.expander("Detailed timing & tokens"):
-        st.write(f"- Build/index time: {result['build_seconds']:.2f}s")
-        st.write(f"- Retrieval time: {result['retrieval_seconds']:.2f}s")
-        st.write(f"- Generation time: {result['generation_seconds']:.2f}s")
-        st.write(f"- Temperature: {result['temperature']}")
-        st.write(f"- Prompt tokens: {result['prompt_tokens']:,}")
-        st.write(f"- Completion tokens: {result['completion_tokens']:,}")
-        st.write(f"- Live API used: {'Yes' if result['used_live_api'] else 'No (simulated fallback)'}")
+    with st.expander(translate("detailed_metrics")):
+        st.write(f"- {translate('metric_build_time')}: {result['build_seconds']:.2f}s")
+        st.write(f"- {translate('metric_retrieval_time')}: {result['retrieval_seconds']:.2f}s")
+        st.write(f"- {translate('metric_generation_time')}: {result['generation_seconds']:.2f}s")
+        st.write(f"- {translate('metric_temperature')}: {result['temperature']}")
+        st.write(f"- {translate('metric_prompt_tokens')}: {result['prompt_tokens']:,}")
+        st.write(f"- {translate('metric_completion_tokens')}: {result['completion_tokens']:,}")
+        st.write(f"- {translate('metric_live_api')}: {translate('yes') if result['used_live_api'] else translate('no_simulated')}")
         if result["lite_mode"]:
             reason = result.get("fallback_reason")
-            st.write(f"- ⚠ Ran in lite/keyword-search mode{f' (fallback cause: {reason})' if reason else ''}")
+            cause = f" ({translate('fallback_cause')}: {reason})" if reason else ""
+            st.write(f"- {translate('lite_mode_note')}{cause}")
 
 
 def render_feedback(answer_id: str, question: str, result: dict) -> None:
     """Render feedback buttons (thumbs up/down) for the answer."""
     st.markdown("---")
-    st.markdown("**👍 Was this answer helpful?**")
+    st.markdown(f"**{translate('helpful_question')}**")
 
     col1, col2, col3 = st.columns([1, 1, 3])
 
@@ -421,7 +395,7 @@ def render_feedback(answer_id: str, question: str, result: dict) -> None:
     document_name = st.session_state.get("uploaded_name", "unknown")
 
     with col1:
-        if st.button("👍 Helpful", key=f"feedback_positive_{answer_id}"):
+        if st.button(translate("helpful_btn"), key=f"feedback_positive_{answer_id}"):
             feedback_manager.add_feedback(
                 answer_id=answer_id,
                 rating=True,
@@ -436,11 +410,11 @@ def render_feedback(answer_id: str, question: str, result: dict) -> None:
                 langsmith_run_id=result.get("langsmith_run_id"),
             )
             submit_langsmith_feedback(result.get("langsmith_run_id"), True)
-            st.success("✅ Thanks for the feedback!")
+            st.success(translate("feedback_thanks"))
             print(f"[FEEDBACK] Positive feedback for {answer_id}", file=sys.stderr)
 
     with col2:
-        if st.button("👎 Not helpful", key=f"feedback_negative_{answer_id}"):
+        if st.button(translate("not_helpful_btn"), key=f"feedback_negative_{answer_id}"):
             feedback_manager.add_feedback(
                 answer_id=answer_id,
                 rating=False,
@@ -455,13 +429,13 @@ def render_feedback(answer_id: str, question: str, result: dict) -> None:
                 langsmith_run_id=result.get("langsmith_run_id"),
             )
             submit_langsmith_feedback(result.get("langsmith_run_id"), False)
-            st.warning("📝 We'll use this to improve!")
+            st.warning(translate("feedback_improve"))
             print(f"[FEEDBACK] Negative feedback for {answer_id}", file=sys.stderr)
 
 
 def render_result(mode_key: str, result: dict):
     """Show the answer, feedback buttons, then a toggle button that reveals metrics on demand."""
-    st.subheader("Answer")
+    st.subheader(translate("answer_heading"))
     st.write(result["raw_answer"])
 
     # Render feedback buttons
@@ -472,7 +446,7 @@ def render_result(mode_key: str, result: dict):
     if show_flag not in st.session_state:
         st.session_state[show_flag] = False
 
-    label = "📊 Hide metrics" if st.session_state[show_flag] else "📊 Show metrics"
+    label = translate("hide_metrics") if st.session_state[show_flag] else translate("show_metrics")
     if st.button(label, key=f"toggle_{show_flag}"):
         st.session_state[show_flag] = not st.session_state[show_flag]
 
@@ -549,7 +523,7 @@ def log_to_history(mode: str, question: str, result: dict, document_name: str) -
 
 
 def render_history_sidebar() -> None:
-    """Sidebar is empty - GDPR features moved to footer, auto language detection handles i18n."""
+    """Sidebar is empty - GDPR features moved to footer; the language is chosen on the start screen."""
     pass
 
 
@@ -681,7 +655,7 @@ def render_chat_history() -> None:
         # User message (left-aligned)
         st.markdown(f"""
         <div class="chat-message user">
-            <div class="chat-avatar user">YOU</div>
+            <div class="chat-avatar user">{translate('avatar_user')}</div>
             <div>
                 <div class="chat-bubble user">{question_html}</div>
                 <div class="chat-info user">{time_part}</div>
@@ -695,7 +669,7 @@ def render_chat_history() -> None:
             <div>
                 <div class="chat-bubble bot">{answer_html}</div>
             </div>
-            <div class="chat-avatar bot">BOT</div>
+            <div class="chat-avatar bot">{translate('avatar_bot')}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -709,7 +683,7 @@ def render_chat_history() -> None:
         answer_id = f"ans_{entry.get('timestamp', '')}"
 
         with col1:
-            if st.button("👍 Helpful", key=f"feedback_positive_{answer_id}"):
+            if st.button(translate("helpful_btn"), key=f"feedback_positive_{answer_id}"):
                 if feedback_manager:
                     feedback_manager.add_feedback(
                         answer_id=answer_id,
@@ -725,11 +699,11 @@ def render_chat_history() -> None:
                         langsmith_run_id=metrics.get("langsmith_run_id"),
                     )
                     submit_langsmith_feedback(metrics.get("langsmith_run_id"), True)
-                    st.success("✅ Thanks for the feedback!")
+                    st.success(translate("feedback_thanks"))
                     print(f"[FEEDBACK] Positive feedback for {answer_id}", file=sys.stderr)
 
         with col2:
-            if st.button("👎 Not helpful", key=f"feedback_negative_{answer_id}"):
+            if st.button(translate("not_helpful_btn"), key=f"feedback_negative_{answer_id}"):
                 if feedback_manager:
                     feedback_manager.add_feedback(
                         answer_id=answer_id,
@@ -745,7 +719,7 @@ def render_chat_history() -> None:
                         langsmith_run_id=metrics.get("langsmith_run_id"),
                     )
                     submit_langsmith_feedback(metrics.get("langsmith_run_id"), False)
-                    st.warning("📝 We'll use this to improve!")
+                    st.warning(translate("feedback_improve"))
                     print(f"[FEEDBACK] Negative feedback for {answer_id}", file=sys.stderr)
 
         st.markdown("---")
@@ -936,21 +910,20 @@ if uploaded is not None:
 
         except RuntimeError as e:
             # OCR-related errors
-            st.warning(f"⚠️ **Note on scanned PDFs**: {e}")
-            st.info("📌 **Tip**: For best results, use PDFs with selectable text (not scanned images). "
-                    "If you have a scanned PDF in a non-English language, OCR may need configuration.")
+            st.warning(f"{translate('ocr_note')}: {e}")
+            st.info(translate("ocr_tip_detail"))
             st.session_state.document_text = None
             st.session_state.rag_pipeline = None
             st.session_state.page_count = None
             print(f"[WARNING] Text extraction (OCR): {e}", file=sys.stderr)
         except DocumentTooLargeError as e:
-            st.error(f"📏 **Document too large**: {e}")
+            st.error(f"{translate('document_too_large')} {e}")
             st.session_state.document_text = None
             st.session_state.rag_pipeline = None
             st.session_state.page_count = None
             print(f"[WARNING] Document rejected as too large: {e}", file=sys.stderr)
         except PdfExtractionError as e:
-            st.error(f"📄 **Could not read this PDF**: {e}")
+            st.error(f"{translate('could_not_read_pdf')} {e}")
             st.session_state.document_text = None
             st.session_state.rag_pipeline = None
             st.session_state.page_count = None
@@ -1036,23 +1009,16 @@ if st.session_state.document_text:
                     # Rerun to update chat history display with feedback buttons
                     st.rerun()
                 elif response_status == "simulated":
-                    st.warning(
-                        "The language model is not configured. This simulated preview was not "
-                        "saved to history or counted toward your usage."
-                    )
+                    st.warning(translate("simulated_warning"))
                     st.write(result.get("raw_answer", ""))
                 else:
-                    st.error(
-                        "The language model provider could not complete this request. "
-                        "No answer was saved and the request was not counted toward this app's "
-                        "usage budget."
-                    )
-                    st.info("Please try again later or contact the application operator if the problem continues.")
+                    st.error(translate("provider_error"))
+                    st.info(translate("provider_retry"))
 
             except Exception as e:
                 error_msg = f"{type(e).__name__}: {str(e)}"
-                st.error(f"❌ **Error**: {error_msg}")
-                st.info("**Troubleshooting:**\n- Check your API key in Streamlit secrets\n- Try with a smaller document\n- Check the Streamlit Cloud logs for details")
+                st.error(f"{translate('error_label')} {error_msg}")
+                st.info(translate("troubleshooting"))
                 print(f"[ERROR] {mode} failed: {error_msg}", file=sys.stderr)
                 import traceback
                 traceback.print_exc()

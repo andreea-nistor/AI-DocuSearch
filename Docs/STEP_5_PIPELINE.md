@@ -1,742 +1,176 @@
 # Step 5: Pipeline Orchestration
 
 ## Overview
-The pipeline is the orchestrator that ties all previous steps together into a complete document processing workflow. It manages the flow from document ingestion through answer generation, coordinating all modules into a seamless end-to-end system.
 
-## Purpose
-- Orchestrate all processing steps in correct sequence
-- Manage data flow between modules
-- Provide unified interface for document processing
-- Handle complete question-answering workflow
-- Return formatted results to user
+The pipeline is the orchestration layer of DocuSearch. It connects the earlier steps (ingestion, preprocessing, embedding and indexing, and AI query) into one document question-answering flow. The public API lives in [src/pipeline.py](../src/pipeline.py) and has two entry points:
 
-## System Architecture
-```
-Document Input
-      ↓
-[1] Ingest → Raw Text
-      ↓
-[2] Preprocess → Cleaned Chunks
-      ↓
-[3] Embedding & Index → Searchable Index
-      ↓
-[4] AI Query → Answer with Context
-      ↓
-Result Output
-```
+- `build_pipeline()` takes a file path, extracts its text, and prepares searchable chunks plus an optional embedding index.
+- `answer_question()` takes the pipeline state and a question, selects context, builds the RAG prompt, and returns the answer with metrics.
 
----
+The Streamlit app, the CLI, and tests all use the same two functions, so the result shape stays consistent across callers.
 
-## Detailed Implementation Steps
+## Goals
 
-### Step 5.1: Build Pipeline
-```python
-def build_pipeline(file_path: str, use_embeddings: bool | None = None) -> Dict[str, Any]:
-```
+- Run the processing steps in a fixed order: extract, clean, chunk, index, retrieve, generate.
+- Keep the data flow between modules in one place.
+- Degrade to keyword retrieval instead of failing when embeddings are unavailable or memory is low.
+- Return one result dictionary that the UI, history, feedback, and cost tracking can all rely on.
+- Handle explicit PDF page requests (for example "page 12") deterministically, without semantic search.
 
-**Process:**
+## Design Decisions
 
-1. **Extract Text (Step 1)**
-   - Call `extract_text(file_path)` from ingest module
-   - Reads PDF, DOCX, or text file
-   - Returns raw text string. If the extracted text exceeds `MAX_DOCUMENT_MB` (default 50 MB),
-     `DocumentTooLargeError` is raised before chunking or embedding.
+- **Lite mode is a state, not an error.** When the embedding index cannot be used, the pipeline returns `index: None` with `lite_mode: True`, and `answer_question()` retrieves chunks by keyword overlap. The user still gets an answer.
+- **Embeddings are attempted by default in the web app and keyword search by default elsewhere.** The Streamlit app passes `use_embeddings=True` explicitly. When a caller omits the argument, `DOCUSEARCH_LITE_MODE` decides, and its default (`true`) selects keyword retrieval.
+- **Memory is checked before the model loads.** Loading `all-MiniLM-L6-v2` is the most expensive step, so available memory is read first and embeddings are skipped if it is too low.
+- **Oversized documents are rejected early.** Extracted text above a size limit raises `DocumentTooLargeError` before chunking or embedding starts.
+- **Page markers are respected.** Chunks carry a `[PDF_PAGE:n]` marker, so explicit page requests select the matching chunks directly.
+- **Tracing is optional.** `build_pipeline`, `build_pipeline_from_text`, and `answer_question` are decorated with LangSmith's `traceable` when the library is installed. Otherwise a no-op decorator is used.
 
-2. **Clean & Chunk (Step 2)**
-   - Call `clean_text(text)` to remove artifacts
-   - Call `chunk_text(cleaned)` to create overlapping chunks (default `chunk_size=500, overlap=100`)
+## How the Flow Works
 
-3. **Decide whether to attempt embeddings**
-     - The Streamlit app calls `build_pipeline_from_text(..., use_embeddings=True)`, so
-         `DOCUSEARCH_LITE_MODE` does not control the current web workflow.
-     - The environment variable is consulted only when a caller omits `use_embeddings`, including
-         the current CLI entry points. Its default is `"true"`, which selects keyword retrieval for
-         those callers.
-     - Passing `use_embeddings=False` also selects keyword retrieval directly.
+### 1. Build the pipeline
 
-4. **Memory guard (only when not in lite mode)**
-   - Before loading the embedding model, checks available physical memory via `os.sysconf`,
-     `/proc/meminfo`, then Windows `GlobalMemoryStatusEx`.
-   - If available memory is below `MIN_AVAILABLE_MEMORY_GB` (default 2.0), falls back to lite mode
-     (`index: None`) instead of risking an out-of-memory crash. If memory cannot be determined, the
-     check is skipped and embeddings are attempted.
+`build_pipeline(file_path, use_embeddings=None)` runs these steps:
 
-5. **Build Index (Step 3)**
-   - Create `EmbedIndex()` object and call `index.build_index(chunks)`.
-   - If the index reports `disabled=True` or has no embeddings (e.g. model failed to load or ran
-     out of memory), falls back to lite mode as well.
+1. Extracts raw text with `extract_text()` from [src/ingest.py](../src/ingest.py) (see [STEP_1_INGEST.md](STEP_1_INGEST.md)).
+2. Passes the text to `build_pipeline_from_text()`, which does the remaining work.
+3. Checks the extracted text size. The size is measured in characters converted to MB (1 MB = 1,024 × 1,024 characters), not in file bytes. Text above `MAX_DOCUMENT_MB` raises `DocumentTooLargeError`.
+4. Cleans the text with `clean_text()` and splits it with `chunk_text()` from [src/preprocess.py](../src/preprocess.py) (see [STEP_2_PREPROCESS.md](STEP_2_PREPROCESS.md)). Chunking does not cross PDF page boundaries.
+5. Decides whether to attempt embeddings (see the next section).
+6. If embeddings are wanted, checks available memory. If the value is known and below `MIN_AVAILABLE_MEMORY_GB`, the pipeline switches to lite mode. If memory cannot be determined, the check is skipped and embeddings are attempted.
+7. Creates an `EmbedIndex` and calls `build_index(chunks)` (see [STEP_3_EMBEDDING_INDEXING.md](STEP_3_EMBEDDING_INDEXING.md)). If the index is disabled, has no embeddings, or the check on its state raises an error, the pipeline switches to lite mode.
+8. Returns a dictionary with `index`, `chunks`, and `lite_mode`. `index` is `None` whenever lite mode is active.
 
-6. **Return Pipeline State**
-   - Dictionary with `index`, `chunks`, and `lite_mode: bool`.
-   - `index` is `None` whenever lite mode is active.
-
-**Implementation (simplified; actual code adds `stderr` debug logging at each step):**
-```python
-from .ingest import extract_text
-from .preprocess import clean_text, chunk_text
-from .embed_index import EmbedIndex
-from .ai_query import generate_answer_with_meta
-from .prompt_loader import load_prompt_with_temperature
-from typing import Dict, Any
-import os
-import time
-
-def build_pipeline(file_path: str, use_embeddings: bool | None = None) -> Dict[str, Any]:
-    text = extract_text(file_path)
-    cleaned = clean_text(text)
-    chunks = chunk_text(cleaned)
-
-    if use_embeddings is None:
-        lite_mode = os.getenv("DOCUSEARCH_LITE_MODE", "true").strip().lower()
-        use_embeddings = lite_mode not in {"1", "true", "yes", "on"}
-
-    if not use_embeddings:
-        return {"index": None, "chunks": chunks, "lite_mode": True}
-
-    avail_gb = _available_memory_gb()
-    if avail_gb is not None and avail_gb < MIN_AVAILABLE_MEMORY_GB:
-        return {"index": None, "chunks": chunks, "lite_mode": True}
-
-    index = EmbedIndex()
-    index.build_index(chunks)
-    if index.disabled or index.embeddings is None:
-        return {"index": None, "chunks": chunks, "lite_mode": True}
-
-    return {"index": index, "chunks": chunks, "lite_mode": False}
-```
-
-**Examples:**
-```python
-# CLI/core use: mode is chosen by DOCUSEARCH_LITE_MODE because no override is passed.
-pipeline = build_pipeline("documents/contract.pdf")
-
-# Web-equivalent use: attempt embeddings regardless of DOCUSEARCH_LITE_MODE.
-pipeline = build_pipeline("documents/contract.pdf", use_embeddings=True)
-```
-
----
-
-### Step 5.1b: Web Mode, CLI Default, and Retrieval Fallback
-
-The Streamlit app and callers that omit `use_embeddings` use different configuration paths:
+### 2. Choose the retrieval mode
 
 | Condition | Result |
 |---|---|
-| Streamlit app | Passes `use_embeddings=True`; `DOCUSEARCH_LITE_MODE` is ignored |
-| `use_embeddings=True` passed explicitly | Embedding attempt, subject to runtime fallback below |
-| `use_embeddings=False` passed explicitly | Keyword retrieval — `index=None` |
-| `use_embeddings` omitted and `DOCUSEARCH_LITE_MODE=true` (default) | Keyword retrieval — `index=None` |
-| `use_embeddings` omitted and `DOCUSEARCH_LITE_MODE=false` | Embedding attempt |
-| Available memory < `MIN_AVAILABLE_MEMORY_GB` (default 2 GB) | Forced lite mode, even if `use_embeddings=True`; skipped when memory is unknown |
-| Extracted text > `MAX_DOCUMENT_MB` (default 50 MB) | `DocumentTooLargeError` raised before chunking or embedding |
-| `EmbedIndex` fails to load the model or build embeddings (e.g. `MemoryError`) | Forced lite mode |
+| Streamlit app (passes `use_embeddings=True`) | Embedding attempt; `DOCUSEARCH_LITE_MODE` is ignored |
+| `use_embeddings=True` passed explicitly | Embedding attempt, subject to the runtime fallbacks |
+| `use_embeddings=False` passed explicitly | Keyword retrieval (`index: None`) |
+| `use_embeddings` omitted, `DOCUSEARCH_LITE_MODE` true or unset | Keyword retrieval |
+| `use_embeddings` omitted, `DOCUSEARCH_LITE_MODE` false | Embedding attempt |
+| Available memory below `MIN_AVAILABLE_MEMORY_GB` | Lite mode, even when embeddings were requested |
+| Embedding index unavailable after build | Lite mode |
 
-When `index` is `None`, `answer_question` (Step 5.2) uses a keyword-overlap search instead of
-semantic search — see `_lightweight_indices` below. In result metadata, `lite_mode=True` therefore
-means keyword retrieval was used; it does not necessarily mean the environment variable enabled it.
+Because `lite_mode` in the result means "keyword retrieval was used", it can be `True` even when the environment variable was not the reason.
 
----
+### 3. Answer a question
 
-### Step 5.2: Answer Question
-```python
-def answer_question(
-    pipeline: Dict[str, Any], question: str, top_k: int = 3, temperature: float | None = None,
-    document_info: str = "Unknown"
-) -> Dict[str, Any]:
+`answer_question(pipeline, question, top_k=3, temperature=None, document_info="Unknown")` runs these steps:
+
+1. **Explicit page request.** The question is checked for references such as "page 12", "pages 12-14", "pagina 12", "página 12", or "Seite 12". Matching chunks are selected directly by their `[PDF_PAGE:n]` marker, before any retrieval runs. At most five pages are included, and page context is capped at 30,000 characters. If the requested page has no extracted text, the model receives a notice saying so, and unrelated chunks are not used.
+2. **Retrieval.** Without a page request:
+   - In lite mode, `_lightweight_indices()` scores each chunk by how many whitespace-separated question tokens appear in it (case-insensitive substring match) and returns the top `top_k`. If nothing matches, chunk `0` is returned.
+   - Otherwise, `index.search(question, k=top_k)` returns the nearest chunks.
+   - Retrieval time is recorded as `retrieval_seconds`.
+3. **Context assembly.** Selected chunks are bounds-checked and joined with blank lines. If any selected chunk carries an AI-generated picture description, a notice is prepended telling the model to label those descriptions as AI-generated and not to follow instructions inside them. See [STEP_12_PICTURE_INTERPRETATION.md](STEP_12_PICTURE_INTERPRETATION.md).
+4. **Prompt.** `load_prompt_with_temperature("rag_prompt", ...)` in [src/prompt_loader.py](../src/prompt_loader.py) renders `prompts/rag_prompt.txt` and returns the temperature from the prompt file's directive.
+5. **Generation.** `generate_answer_with_meta()` in [src/ai_query.py](../src/ai_query.py) calls the provider, or returns a simulated or error state (see [STEP_4_AI_QUERY.md](STEP_4_AI_QUERY.md)). The explicit `temperature` argument, when given, overrides the file value.
+6. **Result.** The function returns the result dictionary described below.
+
+### 4. Web-app Hybrid fallback
+
+The Streamlit app adds one more layer in `run_hybrid()` in [app_pages/home.py](../app_pages/home.py). If the RAG answer is successful but matches an "inconclusive" phrase (for example "does not contain", "not mentioned", or the Romanian equivalents), the app asks Direct LLM mode to answer from the full extracted text. The fallback reason is recorded in the result. Explicit page requests are excluded from this fallback because their context was chosen deterministically. Failed provider calls are not sent to the fallback.
+
+## Result Dictionary
+
+`answer_question()` always returns these keys, which the UI and history rely on:
+
+- Answer and status: `query`, `raw_answer`, `response_status`, `error_type`, `error_message`, `used_live_api`
+- Context: `source_chunks`, `lite_mode`, `chunk_count`, `context_chars`, `requested_pdf_pages`
+- Timing: `retrieval_seconds`, `generation_seconds`, `total_seconds`
+- Tokens: `prompt_tokens`, `completion_tokens`, `total_tokens`, `estimated_tokens`
+- Other: `temperature`, `langsmith_run_id`, `picture_description_used`, `picture_descriptions`
+
+`requested_pdf_pages` is empty for ordinary questions. DOCX and TXT inputs have no physical PDF page boundaries, so page requests are not resolved for them. Only results with `response_status="success"` are charged, saved to history, or offered for rating.
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DOCUSEARCH_LITE_MODE` | `true` | Chooses keyword or embedding retrieval only for callers that omit `use_embeddings` (for example the CLI). Does not affect the Streamlit app. |
+| `MAX_DOCUMENT_MB` | `50` | Size limit for extracted text. Larger documents raise `DocumentTooLargeError`. |
+| `MIN_AVAILABLE_MEMORY_GB` | `2.0` | Available-memory threshold below which embeddings are skipped. |
+
+These are read when the module is imported. See [.env.example](../.env.example) for the full list of settings.
+
+## Error Handling and Fallbacks
+
+- **Oversized document:** `DocumentTooLargeError` is raised before chunking, so no embedding work starts. The message includes the measured size and the limit.
+- **Low or unknown memory:** Low memory forces lite mode. Unknown memory (for example, a platform where no method works) does not block embeddings.
+- **Embedding failure:** If the index is disabled or has no embeddings after build (for example, the model failed to load or ran out of memory), the pipeline returns lite mode instead of raising.
+- **Chunking failure:** The error is logged to stderr and re-raised.
+- **Out-of-range indices:** Retrieved indices are filtered against the chunk count before use.
+- **Unavailable page:** The model is told that the requested physical page has no extracted text. The pipeline does not substitute unrelated chunks.
+- **Provider failure:** Errors from `generate_answer_with_meta()` are returned in `response_status` and `error_message` rather than raised.
+
+Diagnostic messages are written to stderr with a `[PIPELINE]` prefix.
+
+## Memory Detection
+
+`_available_memory_gb()` tries three methods in order and returns the first usable value in GB:
+
+1. POSIX `os.sysconf` (available physical pages × page size). Works on Linux containers such as Streamlit Cloud, and on macOS.
+2. `MemAvailable` from `/proc/meminfo`.
+3. Windows `GlobalMemoryStatusEx` through `ctypes`.
+
+It returns `None` when none of the methods works. A `None` result is never treated as zero memory.
+
+## Module Layout
+
+**File:** [src/pipeline.py](../src/pipeline.py)
+
+Public functions:
+
+- `build_pipeline(file_path, use_embeddings=None)`
+- `build_pipeline_from_text(text, use_embeddings=None)` (used by the web app, which already has extracted text)
+- `answer_question(pipeline, question, top_k=3, temperature=None, document_info="Unknown")`
+
+Internal helpers:
+
+- `_lightweight_indices()` (keyword retrieval)
+- `_requested_pdf_pages()`, `_indices_for_pdf_pages()`, and `_pdf_page_request_is_truncated()` (explicit page requests)
+- `_available_memory_gb()` (memory check)
+
+Modules it depends on:
+
+- [src/ingest.py](../src/ingest.py), [src/preprocess.py](../src/preprocess.py), [src/embed_index.py](../src/embed_index.py), [src/ai_query.py](../src/ai_query.py)
+- [src/prompt_loader.py](../src/prompt_loader.py) for the RAG prompt and its temperature
+- [src/visual_content.py](../src/visual_content.py) for extracting picture-description markers
+
+## Tests
+
+Pipeline behavior is covered by the existing suites. Run them from the repository root:
+
+```powershell
+python -m test_src.test_ingest
+python -m test_src.test_ai_query
+python -m test_src.test_visual_ingest
 ```
 
-**Process:**
-
-1. **Check explicit physical PDF page requests**
-    - Detect references such as `page 12`, `pages 12-14`, `pagina 12`, `página 12`, or `Seite 12`.
-    - Select every chunk labeled for those pages before embedding or keyword retrieval.
-    - Include at most the first five requested pages and 30,000 context characters.
-    - If a requested page is unavailable, tell the model that directly instead of retrieving unrelated chunks.
-    - Physical PDF numbering starts at the first file page and may differ from numbers printed in the document.
-
-2. **Semantic Fallback (implemented in `app_pages/home.py`, not in `answer_question` itself)**
-   - After RAG returns an answer, `run_hybrid()` in `app_pages/home.py` checks if it's inconclusive
-   - Inconclusive patterns detected: "does not provide", "does not contain", "not found in", "cannot find", "i don't know", "unclear", "not specified", "not mentioned" (plus Romanian, French, Spanish, and German equivalents)
-    - If inconclusive, `run_hybrid()` automatically invokes Direct LLM mode for a better answer using the full text
-    - Explicit page requests do not use this fallback because their context was selected deterministically
-   - Fallback reason is tracked in the web app's result for metrics transparency
-
-3. **Branch on lite mode (timed)**
-   - If `pipeline["index"] is None` (lite mode), retrieval uses `_lightweight_indices` (keyword
-     overlap) instead of semantic search — see Step 5.2b.
-   - Otherwise, calls `pipeline["index"].search(question, k=top_k)` for semantic retrieval.
-   - Wall-clock time for this step is captured as `retrieval_seconds`.
-
-4. **Construct Context String**
-   - Extract chunks at returned indices (bounds-checked against `len(chunks)`)
-   - Join with double newlines for clarity
-
-5. **Build Prompt (Step 4)**
-   - Load `prompts/rag_prompt.txt` via
-     `load_prompt_with_temperature("rag_prompt", context=context, question=question)` from
-     `src/prompt_loader.py`, which returns both the rendered prompt and the temperature to use for
-     this call — resolved from a `# temperature: <value>` directive on the prompt file's first
-     line, or `LLM_TEMPERATURE`, or `0.2` if neither is set. The `temperature` argument to
-     `answer_question` is an optional override that takes precedence over the file/env value when
-     explicitly passed (e.g. for tests or CLI use); the unified web app doesn't pass one, so the
-     prompt file's directive is what controls it there.
-
-6. **Generate Answer (Step 4, timed and with token metrics)**
-   - Call `generate_answer_with_meta(prompt, temperature=resolved_temperature)` — a live provider
-    call, an explicit missing-config simulation, or a configured-provider error — returning the
-    answer state plus `elapsed_seconds`, token counts, temperature, and usage provenance.
-
-7. **Format Results**
-   - Return dictionary with `query`, `raw_answer`, `source_chunks`, `lite_mode`, plus metrics:
-     `retrieval_seconds`, `generation_seconds`, `total_seconds`, `chunk_count`, `context_chars`,
-         `prompt_tokens`, `completion_tokens`, `total_tokens`, `estimated_tokens`, `used_live_api`,
-         `response_status`, `error_type`, `error_message`, `temperature`, `requested_pdf_pages`,
-         `langsmith_run_id`, `picture_description_used`, `picture_descriptions`
-
-`requested_pdf_pages` is empty for normal semantic questions. DOCX and TXT inputs do not support
-deterministic page addressing because they have no stable physical PDF page boundaries.
-`picture_description_used`/`picture_descriptions` are populated only when the selected chunks carry
-`[PICTURE_DESCRIPTION:<id>|AI_GENERATED]` markers (see `STEP_12_PICTURE_INTERPRETATION.md`); they are
-`False`/`[]` otherwise.
-
-**Implementation:**
-```python
-def answer_question(
-    pipeline: Dict[str, Any], question: str, top_k: int = 3, temperature: float | None = None
-) -> Dict[str, Any]:
-    chunks = pipeline.get("chunks", [])
-    retrieval_start = time.perf_counter()
-    if pipeline.get("index") is None:
-        indices = _lightweight_indices(chunks, question, top_k=top_k)
-        lite_mode = True
-    else:
-        idx = pipeline["index"].search(question, k=top_k)
-        indices = idx.get("indices", [])
-        lite_mode = False
-    retrieval_seconds = time.perf_counter() - retrieval_start
-
-    context = "\n\n".join(chunks[i] for i in indices if i < len(chunks))
-    prompt, file_temperature = load_prompt_with_temperature("rag_prompt", context=context, question=question)
-    meta = generate_answer_with_meta(prompt, temperature=temperature if temperature is not None else file_temperature)
-
-    return {
-        "query": question,
-        "raw_answer": meta["answer"],
-        "response_status": meta["response_status"],
-        "error_type": meta["error_type"],
-        "error_message": meta["error_message"],
-        "source_chunks": indices,
-        "lite_mode": lite_mode,
-        "retrieval_seconds": retrieval_seconds,
-        "generation_seconds": meta["elapsed_seconds"],
-        "total_seconds": retrieval_seconds + meta["elapsed_seconds"],
-        "chunk_count": len(indices),
-        "context_chars": len(context),
-        "prompt_tokens": meta["prompt_tokens"],
-        "completion_tokens": meta["completion_tokens"],
-        "total_tokens": meta["total_tokens"],
-        "estimated_tokens": meta["estimated_tokens"],
-        "used_live_api": meta["used_live_api"],
-        "temperature": meta["temperature"],
-    }
-```
-
-**Example:**
-```python
-# Ask question about document
-result = answer_question(pipeline, "What are the contract dates?", top_k=3)
-
-print(result)
-# Output: {
-#     "query": "What are the contract dates?",
-#     "raw_answer": "The contract runs from January 1...",
-#     "source_chunks": [0, 2, 5],
-#     "lite_mode": False,
-#     "retrieval_seconds": 0.01,
-#     "generation_seconds": 1.42,
-#     "total_seconds": 1.43,
-#     "chunk_count": 3,
-#     "context_chars": 842,
-#     "prompt_tokens": 210,
-#     "completion_tokens": 48,
-#     "total_tokens": 258,
-#     "estimated_tokens": False,
-#     "used_live_api": True,
-#     "temperature": 0.2
-# }
-```
-
----
-
-### Step 5.2b: Lightweight Keyword Search (`_lightweight_indices`)
-
-Used only when `pipeline["index"] is None` (lite mode). It scores each chunk by how many
-lowercased question tokens it contains — no embeddings involved:
-
-```python
-def _lightweight_indices(chunks: list[str], question: str, top_k: int = 3):
-    q = question.lower()
-    scored = []
-    for idx, chunk in enumerate(chunks):
-        score = sum(1 for token in q.split() if token and token in chunk.lower())
-        scored.append((idx, score))
-    scored.sort(key=lambda x: x[1], reverse=True)
-    selected = [idx for idx, _ in scored[:top_k] if idx < len(chunks)]
-    if not selected:
-        selected = [0] if chunks else []
-    return selected
-```
-
-If no chunk contains any matching token, it falls back to returning just chunk `0` (if any chunks
-exist) rather than an empty result.
-
----
-
-### Step 5.3: Retrieval Quality Parameters
-
-**Top-K Parameter:**
-- `top_k=1` - Single most relevant chunk (fast, less context)
-- `top_k=3` - Balanced (default, good for most queries)
-- `top_k=5` - More context (slower, comprehensive)
-- `top_k=10` - Maximum context (slowest, may include noise)
-
-**Recommendation:**
-```python
-# For factual questions (short answers)
-answer_question(pipeline, question, top_k=2)
-
-# For complex questions (detailed answers)
-answer_question(pipeline, question, top_k=5)
-
-# For exploratory questions (comprehensive context)
-answer_question(pipeline, question, top_k=10)
-```
-
----
-
-## Module Location & File Structure
-**File:** `src/pipeline.py`
-
-**Functions:**
-- `build_pipeline(file_path: str, use_embeddings: bool | None = None) -> Dict[str, Any]`
-- `answer_question(pipeline: Dict[str, Any], question: str, top_k: int = 3, temperature: float | None = None) -> Dict[str, Any]`
-- `_lightweight_indices(chunks: list[str], question: str, top_k: int = 3) -> list[int]` (internal, lite-mode retrieval)
-- `_available_memory_gb() -> float | None` (internal; `os.sysconf`, `/proc/meminfo`, then Windows; `None` if unknown)
-
-**Module Imports:**
-```python
-from .ingest import extract_text
-from .preprocess import clean_text, chunk_text
-from .embed_index import EmbedIndex
-from .ai_query import generate_answer_with_meta
-from .prompt_loader import load_prompt_with_temperature
-from typing import Dict, Any
-import time
-```
-
-**Environment variables:**
-- `DOCUSEARCH_LITE_MODE` — controls only callers that omit `use_embeddings`; it does not affect
-    the Streamlit app, which passes `use_embeddings=True`
-- `MAX_DOCUMENT_MB` (default 50) — extracted-text size limit; larger documents raise `DocumentTooLargeError`
-- `MIN_AVAILABLE_MEMORY_GB` (default 2.0) — available-memory threshold for the lite-mode fallback
-
-**Dependencies:**
-- All previous steps (ingest, preprocess, embed_index, ai_query)
-- `src/prompt_loader.py` — loads `prompts/rag_prompt.txt` and resolves its `# temperature:`
-  directive for `answer_question`'s prompt (see the Temperature section in `STEP_4_AI_QUERY.md`)
-- `src/visual_content.py` — `extract_picture_descriptions()` reads `AI_GENERATED` markers from the
-  selected chunks to populate `picture_description_used`/`picture_descriptions`
-- `langsmith` (optional) — if installed and `LANGSMITH_TRACING=true`, `build_pipeline` and
-  `answer_question` are each wrapped in `@traceable(run_type="chain", ...)`, so a call to
-  `answer_question` shows up nested under `build_pipeline` as a single trace tree in the LangSmith
-  dashboard. `generate_answer_with_meta` (Step 4) uses manual `Client.create_run`/`update_run`
-  tracing rather than `@traceable`, so its run appears alongside, not nested under, the decorated
-  pipeline runs.
-
----
-
-## Complete Workflow Example
-
-```python
-from src.pipeline import build_pipeline, answer_question
-
-# Step 1: Build pipeline from document
-print("1. Loading document...")
-pipeline = build_pipeline("examples/sample.pdf")
-print(f"   Document loaded. {len(pipeline['chunks'])} chunks created.")
-
-# Step 2: Ask multiple questions
-questions = [
-    "What are the contract dates?",
-    "What are the payment terms?",
-    "When does renewal occur?",
-]
-
-for q in questions:
-    print(f"\n2. Answering: {q}")
-    result = answer_question(pipeline, q, top_k=3)
-    print(f"   Answer: {result['raw_answer'][:200]}...")
-    print(f"   Source chunks: {result['source_chunks']}")
-```
-
----
-
-## Testing Methods
-
-### Test 5.1: Pipeline Initialization Test
-**Objective:** Verify that pipeline builds correctly
-
-**Test Case:**
-```python
-from src.pipeline import build_pipeline
-import os
-
-def test_pipeline_initialization():
-    # Use test document
-    test_file = "examples/sample.pdf"
-    
-    # Skip if test file doesn't exist
-    if not os.path.exists(test_file):
-        print("⊘ Test file not found, skipping test")
-        return
-    
-    # Build pipeline
-    pipeline = build_pipeline(test_file)
-    
-    # Assertions:
-    assert isinstance(pipeline, dict), "Pipeline should be dictionary"
-    assert "index" in pipeline, "Pipeline should have 'index' key"
-    assert "chunks" in pipeline, "Pipeline should have 'chunks' key"
-    assert len(pipeline["chunks"]) > 0, "Should have at least one chunk"
-    
-    print("✓ Pipeline initialization test passed")
-```
-
----
-
-### Test 5.2: Answer Generation Test
-**Objective:** Verify complete question-answering workflow
-
-**Test Case:**
-```python
-from src.pipeline import build_pipeline, answer_question
-
-def test_answer_generation():
-    # Prepare test data
-    test_file = "examples/sample.pdf"
-    
-    if not os.path.exists(test_file):
-        print("⊘ Test file not found, skipping test")
-        return
-    
-    # Build pipeline
-    pipeline = build_pipeline(test_file)
-    
-    # Ask question
-    question = "What is discussed in this document?"
-    result = answer_question(pipeline, question)
-    
-    # Assertions:
-    assert isinstance(result, dict), "Result should be dictionary"
-    assert "query" in result, "Result should have 'query'"
-    assert "raw_answer" in result, "Result should have 'raw_answer'"
-    assert "source_chunks" in result, "Result should have 'source_chunks'"
-    
-    assert result["query"] == question, "Query should match input"
-    assert isinstance(result["raw_answer"], str), "Answer should be string"
-    assert len(result["raw_answer"]) > 0, "Answer should not be empty"
-    assert isinstance(result["source_chunks"], list), "Source chunks should be list"
-    
-    print("✓ Answer generation test passed")
-```
-
----
-
-### Test 5.3: Top-K Parameter Test
-**Objective:** Verify top_k parameter controls retrieval
-
-**Test Case:**
-```python
-def test_top_k_parameter():
-    test_file = "examples/sample.pdf"
-    
-    if not os.path.exists(test_file):
-        print("⊘ Test file not found, skipping test")
-        return
-    
-    pipeline = build_pipeline(test_file)
-    question = "Sample question"
-    
-    # Test different k values
-    for k in [1, 3, 5]:
-        result = answer_question(pipeline, question, top_k=k)
-        
-        num_sources = len(result["source_chunks"])
-        expected = min(k, len(pipeline["chunks"]))
-        assert num_sources <= expected, \
-            f"Should return at most {expected} sources for k={k}"
-    
-    print("✓ Top-K parameter test passed")
-```
-
----
-
-### Test 5.4: Multi-Question Test
-**Objective:** Verify pipeline can handle multiple questions
-
-**Test Case:**
-```python
-def test_multiple_questions():
-    test_file = "examples/sample.pdf"
-    
-    if not os.path.exists(test_file):
-        print("⊘ Test file not found, skipping test")
-        return
-    
-    pipeline = build_pipeline(test_file)
-    
-    # Ask multiple questions
-    questions = [
-        "What is this about?",
-        "Tell me more details",
-        "When is something mentioned?",
-    ]
-    
-    for q in questions:
-        result = answer_question(pipeline, q)
-        
-        assert isinstance(result, dict), f"Failed for question: {q}"
-        assert len(result["raw_answer"]) > 0, f"No answer for: {q}"
-    
-    print("✓ Multiple questions test passed")
-```
-
----
-
-### Test 5.5: Result Format Test
-**Objective:** Verify result format is correct and complete
-
-**Test Case:**
-```python
-def test_result_format():
-    test_file = "examples/sample.pdf"
-    
-    if not os.path.exists(test_file):
-        print("⊘ Test file not found, skipping test")
-        return
-    
-    pipeline = build_pipeline(test_file)
-    question = "Test question"
-    result = answer_question(pipeline, question)
-    
-    # Check structure
-    assert isinstance(result, dict), "Result should be dict"
-    
-    # Check all required fields
-    required_fields = ["query", "raw_answer", "source_chunks"]
-    for field in required_fields:
-        assert field in result, f"Missing field: {field}"
-    
-    # Check field types
-    assert isinstance(result["query"], str), "Query should be string"
-    assert isinstance(result["raw_answer"], str), "Answer should be string"
-    assert isinstance(result["source_chunks"], list), "Source chunks should be list"
-    
-    # Check field content
-    assert result["query"] == question, "Query should match input"
-    assert len(result["raw_answer"]) > 0, "Answer should not be empty"
-    assert all(isinstance(i, int) for i in result["source_chunks"]), \
-        "Source chunk indices should be integers"
-    assert all(0 <= i < len(pipeline["chunks"]) for i in result["source_chunks"]), \
-        "Source chunk indices should be valid"
-    
-    print("✓ Result format test passed")
-```
-
----
-
-### Test 5.6: Source Chunk Validity Test
-**Objective:** Verify returned source chunks are valid and retrievable
-
-**Test Case:**
-```python
-def test_source_chunk_validity():
-    test_file = "examples/sample.pdf"
-    
-    if not os.path.exists(test_file):
-        print("⊘ Test file not found, skipping test")
-        return
-    
-    pipeline = build_pipeline(test_file)
-    result = answer_question(pipeline, "Sample question", top_k=3)
-    
-    # Verify all source chunks are accessible
-    for idx in result["source_chunks"]:
-        assert 0 <= idx < len(pipeline["chunks"]), \
-            f"Invalid chunk index: {idx}"
-        
-        chunk = pipeline["chunks"][idx]
-        assert isinstance(chunk, str), "Chunk should be string"
-        assert len(chunk) > 0, "Chunk should not be empty"
-    
-    print("✓ Source chunk validity test passed")
-```
-
----
-
-## DocuSearch — Running Tests from Command Line
-
-### Quick Manual Test
-```bash
-# Test pipeline build
-python -c "from src.pipeline import build_pipeline; p = build_pipeline('examples/sample.pdf'); print(f'Chunks: {len(p[\"chunks\"])}')"
-
-# Test Q&A
-python -c "from src.pipeline import build_pipeline, answer_question; p = build_pipeline('examples/sample.pdf'); r = answer_question(p, 'What is discussed?'); print(r['raw_answer'][:100])"
-```
-
-### Using the Module Directly
-```bash
-# Run the pipeline module
-python src/pipeline.py <file> <question>
-
-# Example:
-python src/pipeline.py examples/sample.pdf "What are the main points?"
-```
-
-### Using the Demo Script
-```bash
-# Run demo with proper argument handling
-python demo.py examples/sample.pdf "What are the contract dates?"
-```
-
-### Complete Test Suite
-```python
-# test_pipeline.py
-from src.pipeline import build_pipeline, answer_question
-import os
-
-def run_all_tests():
-    print("Running Pipeline Tests...")
-    test_pipeline_initialization()
-    test_answer_generation()
-    test_top_k_parameter()
-    test_multiple_questions()
-    test_result_format()
-    test_source_chunk_validity()
-    print("\n✓ All pipeline tests passed!")
-
-if __name__ == "__main__":
-    run_all_tests()
-```
-
-Run with:
-```bash
-python test_pipeline.py
-```
-
----
-
-## Performance Metrics
-
-### Typical Execution Time (by step)
-| Step | Time | Notes |
-|------|------|-------|
-| Ingest | 1-5s | Depends on document size |
-| Preprocess | <1s | Very fast |
-| Build Index | 5-30s | Embedding generation (cached after first use) |
-| Answer Query | 5-60s | Depends on context size and LLM speed |
-| **Total** | **15-100s** | Dominated by embedding and LLM steps |
-
-### Optimization Tips
-1. **First Run:** Takes longer due to model downloads
-2. **Subsequent Runs:** Faster (models cached)
-3. **Batch Queries:** Reuse same pipeline for multiple questions
-4. **Reduce Chunks:** Fewer chunks = faster embedding
-5. **Reduce Context:** Smaller top_k = faster LLM response
-
----
-
-## Advanced Configuration
-
-### Custom Chunk Parameters
-```python
-# From pipeline, modify chunking strategy
-def build_pipeline_custom(file_path: str, chunk_size=2000, overlap=500):
-    text = extract_text(file_path)
-    cleaned = clean_text(text)
-    chunks = chunk_text(cleaned, chunk_size=chunk_size, overlap=overlap)
-    # ... rest of pipeline
-```
-
-### Custom Top-K Strategy
-```python
-# Adaptive top-k based on query type
-def answer_question_adaptive(pipeline, question, top_k=None):
-    if top_k is None:
-        # Smart default based on question length
-        top_k = 3 if len(question) < 50 else 5
-    
-    return answer_question(pipeline, question, top_k=top_k)
-```
-
----
-
-## Common Issues & Solutions
-
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| Very slow first run | Model downloading | Patience - automatic caching |
-| Out of memory | Document too large | Reduce chunk size or number |
-| Poor answer quality | Bad retrieval | Adjust top_k or prompt |
-| Irrelevant sources | Weak semantic search | Check chunk size and overlap |
-| Timeout errors | LLM too slow | Reduce context size (top_k) |
-| "Module not found" | Missing dependencies | `pip install -r requirements.txt` |
-
----
-
-## Integration Guide
-
-### Using in Python Code
-```python
-from src.pipeline import build_pipeline, answer_question
-
-# Initialize once
-pipeline = build_pipeline("document.pdf")
-
-# Reuse for multiple questions
-for question in user_questions:
-    result = answer_question(pipeline, question)
-    print(result["raw_answer"])
-```
-
-### Using via Command Line
-```bash
-# Single query
-python demo.py document.pdf "Your question here?"
-
-# Multiple queries (in a loop)
-for q in "question1" "question2"; do
-    python demo.py document.pdf "$q"
-done
-```
-
-### Using as Module
-```python
-# In another project
-import sys
-sys.path.append('path/to/agent')
-
-from src.pipeline import build_pipeline, answer_question
-```
-
----
-
-## Next Steps
-
-After understanding the pipeline, you can:
-1. **Run the demo** to see end-to-end workflow
-2. **Test individual steps** to verify each component
-3. **Customize parameters** for your use case
-4. **Deploy** as API or service
-5. **Fine-tune** based on your domain
+What each suite covers for this step:
+
+- `test_ingest`: the size limit, small-document behavior, the low-memory fallback to lite mode, memory detection, and pipeline use after upload cleanup.
+- `test_ai_query`: pipeline propagation of provider failures, explicit PDF page requests (including ranges, languages, unavailable pages, and the five-page limit), and the Hybrid rule that page requests do not fall back to the full document.
+- `test_visual_ingest`: picture descriptions passing through `answer_question()` with the AI-generated label.
+
+## Limitations
+
+- Keyword retrieval in lite mode is simple token overlap. It does not handle stemming, synonyms, or other languages well, and it can return weakly related chunks.
+- The size limit counts extracted text characters, not the original file size.
+- Memory detection is best effort. On platforms where it fails, embeddings are attempted regardless of memory.
+- Explicit page requests depend on physical PDF page markers. Printed page numbers inside a document may differ.
+- Page requests are limited to five physical pages per question, and context is capped at 30,000 characters.
+- `answer_question()` uses the top-k setting only; there is no adaptive selection of `top_k`.
+
+## Related
+
+- [STEP_1_INGEST.md](STEP_1_INGEST.md): text extraction and OCR
+- [STEP_2_PREPROCESS.md](STEP_2_PREPROCESS.md): cleaning and chunking
+- [STEP_3_EMBEDDING_INDEXING.md](STEP_3_EMBEDDING_INDEXING.md): embedding index and search
+- [STEP_4_AI_QUERY.md](STEP_4_AI_QUERY.md): provider calls and prompt temperature
+- [STEP_6_HISTORY_TRACKING.md](STEP_6_HISTORY_TRACKING.md): storing successful results
+- [STEP_8_FEEDBACK_COLLECTION.md](STEP_8_FEEDBACK_COLLECTION.md): rating successful answers
+- [STEP_10_COST_TRACKING.md](STEP_10_COST_TRACKING.md): token and cost metrics
+- [STEP_12_PICTURE_INTERPRETATION.md](STEP_12_PICTURE_INTERPRETATION.md): picture descriptions in the context

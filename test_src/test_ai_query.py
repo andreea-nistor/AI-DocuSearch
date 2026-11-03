@@ -273,7 +273,9 @@ def test_large_page_range_is_limited_explicitly() -> None:
 
 
 def test_streamlit_provider_failure_is_not_saved() -> None:
-    app = AppTest.from_file("web_app.py", default_timeout=30)
+    app = AppTest.from_file(Path(__file__).resolve().parent.parent / "web_app.py", default_timeout=30)
+    app.session_state["user_language"] = "en"
+    app.session_state["user_language_chosen"] = True
     app.session_state["gdpr_consent_given"] = True
     app.run()
 
@@ -313,7 +315,9 @@ def test_streamlit_provider_failure_is_not_saved() -> None:
 
 
 def test_hybrid_page_request_does_not_fall_back_to_full_document() -> None:
-    app = AppTest.from_file("web_app.py", default_timeout=30)
+    app = AppTest.from_file(Path(__file__).resolve().parent.parent / "web_app.py", default_timeout=30)
+    app.session_state["user_language"] = "en"
+    app.session_state["user_language_chosen"] = True
     app.session_state["gdpr_consent_given"] = True
     app.run()
 
@@ -364,7 +368,9 @@ def test_hybrid_page_request_does_not_fall_back_to_full_document() -> None:
 
 def test_chat_history_escapes_html_from_document_or_answer_content() -> None:
     """A prompt-injected/malicious answer or question must render as inert text, not live HTML."""
-    app = AppTest.from_file("web_app.py", default_timeout=30)
+    app = AppTest.from_file(Path(__file__).resolve().parent.parent / "web_app.py", default_timeout=30)
+    app.session_state["user_language"] = "en"
+    app.session_state["user_language_chosen"] = True
     app.session_state["gdpr_consent_given"] = True
     app.run()
 
@@ -399,7 +405,9 @@ def test_chat_history_escapes_html_from_document_or_answer_content() -> None:
 
 
 def test_streamlit_budget_limit_blocks_chat_input() -> None:
-    app = AppTest.from_file("web_app.py", default_timeout=30)
+    app = AppTest.from_file(Path(__file__).resolve().parent.parent / "web_app.py", default_timeout=30)
+    app.session_state["user_language"] = "en"
+    app.session_state["user_language_chosen"] = True
     app.session_state["gdpr_consent_given"] = True
     app.run()
 

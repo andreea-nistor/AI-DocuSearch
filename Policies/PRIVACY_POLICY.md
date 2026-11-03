@@ -16,7 +16,7 @@ AI DocuSearch ("Service" or "Application") is a free experimental personal proje
 For data processed directly by this Application, the data controller is:
 
 - **Name:** Andreea Nistor
-- **Email:** lazar87andreea@gmail.com
+- **Email:** nistor_andreea_ii@yahoo.com
 - **Project:** AI DocuSearch, a personal project offered free of charge for experimental testing
 
 The operator is an individual, not a company, and has not appointed a Data Protection Officer. The project aims to handle personal data consistently with applicable privacy requirements, including GDPR rights where they apply. Because this is an experimental service, users should not upload confidential, highly sensitive, or business-critical documents.
@@ -32,7 +32,7 @@ The operator is an individual, not a company, and has not appointed a Data Prote
 - **Session Information**: Conversation history and interaction data
 
 ### 3.2 Information Automatically Collected
-- **Language Signals**: The Application may attempt to read an available `Accept-Language` header or perform server-side IP geolocation to choose a language. Depending on the hosting platform, these signals may describe the hosting server rather than the individual user and may be unavailable.
+- **Language Selection**: The language you choose on the start screen (English or Română) is stored in server-side session state for the current session. The Application does not infer your language from your IP address or browser headers.
 - **Session ID**: Unique identifier for tracking your session
 - **Device Signal**: The Application may attempt to infer whether the browser is mobile when a user-agent signal is available. It does not intentionally create a detailed device profile.
 - **API Usage Metrics**: Token counts, response times, timestamps
@@ -52,7 +52,7 @@ We use collected information for:
 | Purpose | Legal Basis | Retention |
 |---------|------------|-----------|
 | **Process queries** | Service performance | Duration of session |
-| **Language detection** | User preference | Session only |
+| **Language selection** | User preference | Session only |
 | **Improve AI accuracy** | Legitimate interest | 30 days (anonymized) |
 | **Technical support** | Contractual obligation | 30 days |
 | **Analytics & debugging** | Legitimate interest | 90 days max |
@@ -97,17 +97,10 @@ You can download all your personal data at any time:
 - **Purpose**: Process your questions through AI models; when picture interpretation is enabled, describe pictures, charts, and diagrams in your document
 - **Data Shared**: Question text, document excerpts (required for AI processing); when picture interpretation is enabled, a downscaled image of each PDF page (or of an uploaded image) is sent once at upload time to a vision-capable model. Image metadata (such as EXIF) is removed before sending.
 - **Providers**: OpenAI, xAI, Groq, or other configured endpoints
-- **Privacy Policy**: Check your provider's policy (e.g., https://openai.com/policies/privacy-policy)
+- **Privacy Policy**: Check your provider's policy (e.g., https://groq.com/privacy-policy)
 - **Data Residency**: Depends on provider (usually US for major providers)
 
-### 6.3 IP Geolocation (ip-api.com)
-- **Purpose**: Detect your country for language localization
-- **Data Shared**: Your IP address only
-- **Provider**: ip-api.com
-- **Privacy Policy**: https://ip-api.com/privacy
-- **Fallback**: Browser Accept-Language header (no IP needed if available)
-
-### 6.4 Google Forms (Testing Feedback)
+### 6.3 Google Forms (Testing Feedback)
 - **Purpose**: Collect optional feedback about the AI DocuSearch testing experience
 - **Data Shared**: Only the answers you choose to submit through the external form, plus technical data Google may collect under its own policies
 - **Provider**: Google LLC
@@ -115,7 +108,7 @@ You can download all your personal data at any time:
 - **Control**: Opening and submitting the form is optional. Do not include uploaded document content, confidential information, or other personal data in free-text responses.
 - **Deletion**: The Application's "Delete Data" control cannot delete Google Forms responses. Contact the Application operator regarding a submitted response.
 
-### 6.5 No Other Sharing
+### 6.4 No Other Sharing
 - ❌ We do NOT sell your data
 - ❌ We do NOT share with marketing companies
 - ❌ We do NOT use your data for advertising
@@ -199,7 +192,7 @@ California residents can submit requests by contacting us (Section 10).
 ### Privacy Questions & Requests
 **Operator**: Andreea Nistor
 
-**Email**: lazar87andreea@gmail.com
+**Email**: nistor_andreea_ii@yahoo.com
 
 **GitHub**: https://github.com/andreea-nistor/AI-DocuSearch  
 **Response Time**: We aim to respond within 30 days
@@ -236,7 +229,7 @@ We may update this Privacy Policy periodically. The "Last Updated" date above in
 |---------|----------|--------|
 | **Download Data** | Footer "📥 Download Data" | Get a JSON export of locally associated session data |
 | **Delete Data** | Footer "🗑️ Delete Data" | Remove current-session history, feedback, and in-memory document state; third-party copies are subject to provider controls and retention policies |
-| **Language Override** | Not currently available | Language is automatically detected when possible and otherwise defaults to English |
+| **Language Selection** | Start screen (English / Română) | Choose the interface language before the consent notice; the choice lasts for the current session |
 | **Disable Tracing** | Not currently available to users | Deployment configuration is controlled by the project operator |
 | **Clear History** | Automatic after 30 days | Questions/answers auto-deleted |
 
@@ -250,7 +243,7 @@ We may update this Privacy Policy periodically. The "Last Updated" date above in
 | Feedback & Ratings | Legitimate interest (improve service) |
 | Session/IP Data | Legitimate interest (security, functionality) |
 | LangSmith Traces | Legitimate interest (debugging, performance) |
-| Language Detection | Legitimate interest (user experience) |
+| Language Selection | Legitimate interest (user experience) |
 
 ---
 

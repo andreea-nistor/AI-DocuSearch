@@ -408,5 +408,5 @@ if __name__ == "__main__":
     elif len(sys.argv) == 2:
         run_extract(sys.argv[1])
     else:
-        print("Usage:\n  python test_ingest.py           # run ingestion tests\n  python test_ingest.py <file>    # extract text from a file")
+        print("Usage:\n  python -m test_src.test_ingest           # run ingestion tests\n  python -m test_src.test_ingest <file>    # extract text from a file")
         sys.exit(1)

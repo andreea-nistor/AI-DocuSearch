@@ -20,9 +20,9 @@ If that fails (low memory, model unavailable), it seamlessly falls back to direc
 This ensures best-quality answers with reliable fallback behavior.
 
 ### 2. Multilingual and Localized Responses
-The UI automatically detects user language from browser headers or IP geolocation.
+The start screen asks the user to choose English or Romanian before the consent notice. The choice is stored in session state.
 The LLM is instructed to respond in the user's question language.
-Translated strings are available for English, Romanian, French, Spanish, and German. The current
+Translated strings are available for English and Romanian only. The current
 Home page does not expose the optional manual language selector, so failed detection defaults to English.
 
 ### 3. Document-aware and metadata-rich
@@ -54,8 +54,9 @@ presented as production-ready; see the known limitations and legal documents bef
 | **Step 6** | History Tracking | ✅ 95% | Hybrid storage (in-memory + disk) working; sidebar UI deferred |
 | **Step 7** | Cloud Deployment | ⚠️ 80% | Deploys; secrets loading partially hardened; needs testing |
 | **Step 8** | Feedback Collection | ✅ Complete | Thumbs up/down ratings, detailed feedback, per-session isolation |
-| **Step 9** | Internationalization | ✅ Complete | Multilingual UI, auto language detection, document metadata |
+| **Step 9** | Internationalization | ✅ Complete | Bilingual UI (English / Romanian), start-screen language choice, document metadata |
 | **Step 12** | Picture Interpretation | ⚠️ Page-level | Opt-in (`MULTIMODAL_ENABLED`); one vision description per PDF page / image, labeled AI-generated in answers |
+| **Step 13** | Multimodal Implementation Plan | 📋 Planned | Phased roadmap for region-level, table, visual retrieval, audio, and video |
 | **Cost Tracking** | Budget Management | ✅ Complete | Fixed placeholder pricing ($0.03/1K in, $0.10/1K out; not provider-specific), real-time badge, warnings, blocking |
 | **GDPR Compliance** | Privacy & Legal | ✅ Complete | Consent banner, data export/deletion, footer links, legal docs |
 | **UI Chat** | Streamlit App | ✅ Complete | Hybrid mode only, chat bubbles, responsive mobile, page count |
@@ -71,7 +72,7 @@ presented as production-ready; see the known limitations and legal documents bef
 - 💾 **Persistent history:** Dual-layer storage (session cache + disk JSON per user)
 - 📊 **LangSmith tracing:** Manual Client-based tracing for debugging
 - 📋 **User feedback collection:** Thumbs up/down ratings + detailed feedback + analytics export
-- 🌍 **Multilingual support:** Auto-detected language, translated UI (English, Romanian, French, Spanish, German)
+- 🌍 **Bilingual support:** Start-screen choice, translated UI (English, Romanian)
 - 📄 **Document metadata:** Automatic page count detection for PDFs, metadata accessible to LLM
 - 🗣️ **Language-aware responses:** LLM responds in the user's question language
 - 💰 **Cost tracking & budgeting:** Real-time LLM usage monitoring with fixed placeholder pricing, visual badge, budget warnings and blocking
@@ -93,7 +94,7 @@ presented as production-ready; see the known limitations and legal documents bef
 - 🟡 Multi-document search — enhancement
 - 🟡 Analytics dashboard — enhancement
 
-See `IMPLEMENTATION_IMPROVEMENTS.md` for full roadmap.
+See `FUTURE_ADD_INS.md` for the roadmap and open improvements.
 
 ## File structure
 
@@ -104,37 +105,39 @@ AI DocuSearch/
 ├── .gitignore                         # Git ignore rules
 ├── requirements.txt                   # Python dependencies
 ├── packages.txt                       # System dependencies (Streamlit Cloud)
-├── demo.py                            # CLI demo script
 ├── web_app.py                         # Streamlit navigation entry point
-├── history_cli.py                     # CLI for browsing/exporting local history
-├── export_feedback.py                 # Feedback analytics & export tool
-├── langsmith_feedback_report.py       # Reusable feedback export and summary CLI
-├── THIRD_PARTY_SERVICES.md            # External-provider disclosure
-├── PRIVACY_POLICY.md                  # GDPR/CCPA-oriented privacy documentation
-├── TERMS_OF_SERVICE.md                # User agreement & AI disclaimers
+├── Policies/                          # Privacy, terms, and third-party disclosures (EN + RO)
+│   ├── PRIVACY_POLICY.md
+│   ├── TERMS_OF_SERVICE.md
+│   └── THIRD_PARTY_SERVICES.md
 ├── app_pages/
 │   ├── home.py                        # Main document Q&A application
 │   ├── privacy_policy.py              # In-app Privacy Policy
 │   ├── terms_of_service.py            # In-app Terms of Service
 │   └── third_party_services.py        # In-app provider disclosure
-├── test_ingest.py                     # Document ingestion tests
-├── test_ai_query.py                   # Provider response-state & page-request tests
-├── test_visual_ingest.py              # Picture-interpretation tests (mocked vision provider)
-├── test_history.py                    # History tracking tests
-├── test_legal_pages.py                # Legal page navigation verification
-├── test_langsmith.py                  # LangSmith configuration verification
-├── test_langsmith_feedback_report.py  # Feedback-report CLI tests
-├── test_feedback.py                   # Feedback collection tests
+├── test_src/
+│   ├── test_ingest.py                 # Document ingestion tests
+│   ├── test_ai_query.py               # Provider response-state & page-request tests
+│   ├── test_visual_ingest.py          # Picture-interpretation tests (mocked vision provider)
+│   ├── test_history.py                # History tracking tests
+│   ├── test_legal_pages.py            # Legal page navigation verification
+│   ├── test_langsmith.py              # LangSmith configuration verification
+│   ├── test_langsmith_feedback_report.py # Feedback-report CLI tests
+│   └── test_feedback.py               # Feedback collection tests
 ├── src/
 │   ├── ai_query.py
 │   ├── cost_tracker.py                 # Cost tracking & budget management
 │   ├── embed_index.py
+│   ├── export_feedback.py             # Feedback analytics & export tool
 │   ├── feedback_manager.py            # User feedback collection
 │   ├── gdpr_compliance.py             # GDPR features: consent, data export/deletion
-│   ├── history_manager.py
-│   ├── i18n.py                        # Internationalization & multilingual support
+│   ├── history_cli.py                 # CLI for browsing/exporting local history
+│   ├── history_manager.py             # Question history tracking (per-user, per-session)
+│   ├── i18n.py                        # Translations and language-aware prompts
 │   ├── ingest.py
+│   ├── json_io.py                     # Atomic JSON writes for local data files
 │   ├── langsmith_feedback.py          # Helpful/Not helpful → LangSmith run feedback
+│   ├── langsmith_feedback_report.py   # Reusable feedback export and summary CLI
 │   ├── pipeline.py
 │   ├── preprocess.py
 │   ├── prompt_loader.py
@@ -160,9 +163,8 @@ AI DocuSearch/
 │   ├── STEP_10_COST_TRACKING.md            # LLM budget management
 │   ├── STEP_11_GDPR_COMPLIANCE.md          # Privacy & legal framework
 │   ├── STEP_12_PICTURE_INTERPRETATION.md   # Multimodal picture interpretation (NEW)
-│   ├── MULTIMODAL_IMPLEMENTATION_PLAN.md   # Multimodal roadmap and phased plan (NEW)
-│   ├── FUTURE_ADD_INS.md                   # Proposed future features (NEW)
-│   └── IMPLEMENTATION_IMPROVEMENTS.md
+│   ├── STEP_13_MULTIMODAL_IMPLEMENTATION_PLAN.md   # Multimodal phased implementation plan
+│   └── FUTURE_ADD_INS.md                   # Proposed features and open improvements
 ├── examples/
 │   └── sample.txt
 └── ...
@@ -226,7 +228,7 @@ After uploading a document and entering a question, the app runs its single **Hy
 ## Example usage
 
 ```bash
-python demo.py examples/sample.pdf "What are the contract dates?"
+python -m src.pipeline examples/sample.pdf "What are the contract dates?"
 ```
 
 ## Important runtime behavior
@@ -294,7 +296,7 @@ For detailed deployment instructions, see **Docs/STEP_7_STREAMLIT_CLOUD_DEPLOYME
 
 ### LangSmith Integration Fix
 - App now correctly reads LangSmith credentials from Streamlit Cloud **Secrets** (not just `.env`)
-- `test_langsmith.py` included for local verification
+- `test_src/test_langsmith.py` included for local verification
 
 ### Improved Error Handling
 - Better error messages for file extraction failures
@@ -312,12 +314,12 @@ The `Docs/` folder contains step-by-step guides for each component:
 - **STEP_6_HISTORY_TRACKING.md** — (Optional) Session history and analytics
 - **STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md** — Deployment and configuration
 - **STEP_8_FEEDBACK_COLLECTION.md** — Helpful/Not helpful ratings and detailed feedback
-- **STEP_9_INTERNATIONALIZATION.md** — Multilingual UI and language detection
+- **STEP_9_INTERNATIONALIZATION.md** — Bilingual UI and start-screen language choice (see status note)
 - **STEP_10_COST_TRACKING.md** — Session budget and usage tracking
 - **STEP_11_GDPR_COMPLIANCE.md** — Consent, data export/deletion, legal pages
 - **STEP_12_PICTURE_INTERPRETATION.md** — Optional multimodal picture interpretation
-- **MULTIMODAL_IMPLEMENTATION_PLAN.md** — Phased plan for deeper multimodal RAG
-- **FUTURE_ADD_INS.md** — Proposed future features
+- **STEP_13_MULTIMODAL_IMPLEMENTATION_PLAN.md** — Phased plan for deeper multimodal RAG
+- **FUTURE_ADD_INS.md** — Proposed features and open improvements
 
 ## Design notes for GitHub publication
 

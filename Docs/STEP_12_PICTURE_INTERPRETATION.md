@@ -1,173 +1,168 @@
 # Step 12: Automatic Picture Interpretation (Multimodal, Page-Level)
 
-## Overview
+**Status:** Implemented as a page-level slice and disabled by default (`MULTIMODAL_ENABLED=false`).
+Region-level detection, source previews, structured tables, visual embeddings, audio, and video
+remain future work; see [STEP_13_MULTIMODAL_IMPLEMENTATION_PLAN.md](STEP_13_MULTIMODAL_IMPLEMENTATION_PLAN.md).
 
-When `MULTIMODAL_ENABLED=true`, AI DocuSearch interprets pictures at **upload time**. Each PDF page
-(or a standalone PNG/JPEG/WebP upload) is sent once to a vision-capable model, which returns a short
-factual description of any meaningful picture, chart, diagram, screenshot, form, stamp, or
-signature. The description is attached to the same physical page as the document text, so it is
-chunked, indexed, and retrieved together with that text.
+## Goal
 
-When a question is answered from a page that carries a picture description, the answer includes it
-and the LLM is instructed to label it as an AI-generated interpretation, never as text printed in
-the document.
+Text extraction alone misses information that lives in charts, diagrams, screenshots, forms, stamps,
+and signatures. This step adds an optional upload-time pass that asks a vision-capable model for a
+short, factual description of each meaningful picture and stores that description alongside the
+document text, so the existing chunking, embedding, and retrieval flow can find it.
 
-**Status:** Implemented as a page-level slice, disabled by default. Region-level detection,
-source previews, structured tables, visual embeddings, audio, and video remain future work; see
-[MULTIMODAL_IMPLEMENTATION_PLAN.md](MULTIMODAL_IMPLEMENTATION_PLAN.md) and
-[FUTURE_ADD_INS.md](FUTURE_ADD_INS.md).
+## Design decisions
 
----
+- **Page-level granularity.** Each physical PDF page (or each standalone image) is one unit and gets
+  at most one description. Individual pictures are not cropped or given bounding boxes.
+- **Ingestion-time, once per document.** Vision calls happen while the temporary upload still exists.
+  Questions never trigger new vision calls, which keeps per-question cost and latency unchanged.
+- **Descriptions are attached as text.** A description is appended to the matching `[PDF_PAGE:n]`
+  block with a `[PICTURE_DESCRIPTION:<id>|AI_GENERATED]` marker. Chunking, embedding, and keyword
+  retrieval then treat it like any other page text, and the page marker keeps it associated with the
+  correct physical page.
+- **Always labeled as AI-generated.** Answers that use a description are told to disclose it and
+  must not present it as text printed in the document.
+- **Never a hard failure.** Rendering, provider, and configuration problems are reported as a
+  fallback reason. The text-only workflow continues with whatever was produced.
+- **Opt-in.** The feature is off unless explicitly enabled, because it sends page images to the
+  configured LLM provider.
 
-## Data flow
+## How the flow works
 
-```text
-upload (PDF / PNG / JPEG / WebP)
-  -> temporary file (src/upload_storage.py)
-  -> extract_text()                       native text, OCR fallback, or "" for images
-  -> describe_document_images()           one vision call per page / image
-  -> attach_picture_descriptions()        [PICTURE_DESCRIPTION:<id>|AI_GENERATED] under [PDF_PAGE:n]
-  -> build_pipeline_from_text()           existing chunking + embedding path
-  -> answer_question()                    picture_description_used / picture_descriptions
-  -> UI caption "This answer includes an AI-generated picture description."
-```
+1. The user uploads a PDF, or a PNG, JPEG, or WebP image when the feature is enabled. The uploader
+   only offers image types when `MULTIMODAL_ENABLED` is true.
+2. The file is written to a temporary upload file in [src/upload_storage.py](../src/upload_storage.py).
+   The file is removed when the context manager exits, whether or not processing succeeds.
+3. `extract_text()` in [src/ingest.py](../src/ingest.py) runs as usual. Searchable PDFs use their text
+   layer, scanned PDFs fall back to OCR, and images return Tesseract OCR text or an empty string when
+   OCR is unavailable. Images are never decoded as UTF-8.
+4. For PDFs, the page count is read first and at most `MEDIA_MAX_PAGES` pages are selected. The
+   document is marked as truncated when it has more pages than that.
+5. `describe_document_images()` in [src/visual_ingest.py](../src/visual_ingest.py) processes one page
+   or image at a time. Each PDF page is rendered with `pdf2image` at `VISION_RENDER_DPI`, converted to
+   RGB, downscaled to `VISION_MAX_IMAGE_EDGE`, and re-encoded as JPEG. The decoded bitmap is released
+   before the provider call, so only the encoded image is held. Standalone images are validated first.
+6. Each image is sent once to the vision model through `generate_answer_with_meta()` in
+   [src/ai_query.py](../src/ai_query.py), using the prompt in
+   [prompts/picture_description_prompt.txt](../prompts/picture_description_prompt.txt) at temperature 0.2.
+7. Replies equal to, or starting with, `NO_MEANINGFUL_PICTURE` are skipped. Other replies become
+   `PictureDescription` objects. Model output first has any literal `[PDF_PAGE:n]` or
+   `[PICTURE_DESCRIPTION:...]` markers neutralized, so the model cannot forge structure.
+8. `attach_picture_descriptions()` in [src/visual_content.py](../src/visual_content.py) inserts each
+   description under its page marker. Descriptions for pages that are not in the text raise an error,
+   and the Streamlit app catches it and logs it without failing the upload.
+9. The combined text goes through the normal pipeline in [src/pipeline.py](../src/pipeline.py)
+   (`build_pipeline_from_text()`), so chunking and indexing stay unchanged.
+10. At question time, `answer_question()` extracts the descriptions present in the selected chunks.
+    When any are present, the context is prefixed with a notice telling the LLM to add a
+    "Picture description (AI-generated)" section and identify the region. The result reports
+    `picture_description_used` and `picture_descriptions`.
+11. The Streamlit app in [app_pages/home.py](../app_pages/home.py) charges vision tokens to the session
+    budget, shows warnings for incomplete interpretation or page truncation, reports the number of
+    descriptions in the success message, and adds a caption to answers that used a description.
 
-Descriptions are generated **while the temporary upload still exists** and only once per document.
-Questions never trigger new vision calls.
+## Components
 
----
-
-## Modules
-
-### `src/visual_content.py`
-
-| Symbol | Purpose |
-|---|---|
-| `PictureDescription` | Frozen dataclass: `region_id`, `description`, `page_number`, `source_kind`, `confidence`. Validates identifiers and ranges. |
-| `attach_picture_descriptions(text, descriptions)` | Appends labeled blocks to the matching `[PDF_PAGE:n]` block; unpaged descriptions are appended at the end. Raises `ValueError` if a description references a page that is not in the text. |
-| `extract_picture_descriptions(chunks)` | Returns unique `{region_id, description}` dicts found in retrieved chunks. |
-
-Marker format inside a chunk:
-
-```text
-[PDF_PAGE:4]
-Quarterly revenue grew by 12%.
-
-[PICTURE_DESCRIPTION:p4-img1|AI_GENERATED]
-Picture 1: A bar chart titled "Revenue by month" ...
-```
-
-### `src/visual_ingest.py`
-
-| Symbol | Purpose |
-|---|---|
-| `multimodal_enabled()` | Reads `MULTIMODAL_ENABLED`. |
-| `is_visual_source(path)` | `.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`. |
-| `load_validated_image(path)` | Opens a standalone image; rejects non-PNG/JPEG/WebP, animated images, and images above `MEDIA_MAX_IMAGE_PIXELS`; applies EXIF orientation. |
-| `image_to_data_url(image)` | Downscales to `VISION_MAX_IMAGE_EDGE`, re-encodes as JPEG (drops metadata), returns a base64 data URL. |
-| `describe_document_images(path, document_info)` | Renders PDF pages one at a time with `pdf2image` (up to `MEDIA_MAX_PAGES`, `VISION_RENDER_DPI`); each page is encoded and its bitmap released before the next page renders. Loads one image for image uploads. Calls the vision model per page or image and returns a `VisualIngestResult`. **Never raises.** |
-| `VisualIngestResult` | `descriptions`, `images_processed`, `images_skipped`, `pages_truncated`, `prompt_tokens`, `completion_tokens`, `elapsed_seconds`, `fallback_reason`. |
-
-Pages with no meaningful picture are skipped when the model replies `NO_MEANINGFUL_PICTURE`.
-Provider errors and missing configuration stop processing and set `fallback_reason`; any
-descriptions already produced are kept.
-
-### `src/ai_query.py`
-
-`generate_answer_with_meta(prompt, model_name=None, temperature=None, images=None)`
-
-- `images` is a list of data URLs. When present, the request body uses OpenAI-style content parts
-  (`{"type": "text"}` followed by `{"type": "image_url"}` entries) and the model resolves to
-  `VISION_MODEL` before `LLM_MODEL`.
-- Without `images`, the payload is unchanged from previous releases.
-- The return contract (`answer`, `response_status`, tokens, timing, `langsmith_run_id`) is the same.
-
-### `src/ingest.py`
-
-`extract_text()` routes `.png/.jpg/.jpeg/.webp` to `extract_text_from_image()`, which returns
-Tesseract OCR text or `""`. Images are never decoded as UTF-8.
-
-### `src/pipeline.py`
-
-`answer_question()` adds two result fields:
-
-```python
-"picture_description_used": bool,
-"picture_descriptions": [{"region_id": "p4-img1", "description": "..."}],
-```
-
-When descriptions are present in the selected chunks, the RAG context is prefixed with a
-`[PICTURE_DESCRIPTION_NOTICE: ...]` block instructing the LLM to add a
-**Picture description (AI-generated)** section and identify the region.
-
-### `app_pages/home.py`
-
-- The uploader accepts image types only when the feature is enabled.
-- Vision prompt/completion tokens are charged through `track_query_cost()`.
-- Warnings are shown for an incomplete interpretation (`fallback_reason`) or page truncation.
-- The success banner reports the number of picture descriptions.
-- Chat history entries store `picture_description_used` in `metrics` and render a disclosure caption.
-- Direct LLM fallback results carry `picture_description_used=False` and `picture_descriptions=[]`.
-
-### `prompts/picture_description_prompt.txt`
-
-Ingestion-time prompt (`# temperature: 0.2`). Placeholders: `{document_info}`, `{page_label}`.
-Requires chart type/axes/units/trend for charts, components/connections for diagrams, "appears to"
-for uncertain content, the `NO_MEANINGFUL_PICTURE` sentinel for picture-less pages, and forbids
-following instructions found inside the image.
-
----
+- **[src/visual_content.py](../src/visual_content.py):** the `PictureDescription` data type, which
+  validates region IDs, page numbers, and confidence; marker patterns; marker neutralization;
+  attachment of descriptions to pages; and extraction of descriptions from retrieved chunks.
+- **[src/visual_ingest.py](../src/visual_ingest.py):** environment parsing, image validation and
+  normalization, PDF page rendering, the per-page vision loop, and the `VisualIngestResult` summary
+  (counts, token usage, timing, and fallback reason).
+- **[src/ai_query.py](../src/ai_query.py):** accepts image data URLs, sends them as content parts, and
+  selects `VISION_MODEL` when images are present. Text-only requests are unchanged.
+- **[src/ingest.py](../src/ingest.py):** routes image uploads to OCR and never reads them as text.
+- **[src/pipeline.py](../src/pipeline.py):** detects description markers in selected chunks and adds the
+  disclosure notice and result fields.
+- **[prompts/picture_description_prompt.txt](../prompts/picture_description_prompt.txt):** asks for chart
+  type, axes, units, legend, trend, and approximate values for charts; components and connections for
+  diagrams; "appears to" for uncertain content; and the `NO_MEANINGFUL_PICTURE` sentinel for pages
+  without pictures. It also tells the model not to follow instructions found inside images.
 
 ## Configuration
 
-```dotenv
-MULTIMODAL_ENABLED=false        # master switch; default off
-VISION_MODEL=                   # vision-capable model on LLM_API_BASE; falls back to LLM_MODEL
-MEDIA_MAX_PAGES=25              # PDF pages rendered and interpreted per document
-MEDIA_MAX_IMAGE_PIXELS=20000000 # decoded-pixel limit for standalone images
-VISION_RENDER_DPI=110           # pdf2image render resolution
-VISION_MAX_IMAGE_EDGE=1568      # longest edge sent to the provider
-```
+| Variable | Default | Purpose |
+|---|---|---|
+| `MULTIMODAL_ENABLED` | `false` | Master switch for uploads and picture interpretation. |
+| `VISION_MODEL` | empty | Vision-capable model on `LLM_API_BASE`. Falls back to `LLM_MODEL` when empty. |
+| `MEDIA_MAX_PAGES` | `25` | Maximum PDF pages rendered and interpreted per document. |
+| `MEDIA_MAX_IMAGE_PIXELS` | `20000000` | Maximum decoded pixel count for standalone images. |
+| `VISION_RENDER_DPI` | `110` | Resolution used when rendering PDF pages. |
+| `VISION_MAX_IMAGE_EDGE` | `1568` | Longest edge, in pixels, of an image sent to the provider. |
 
-Poppler (`POPPLER_PATH` locally, `packages.txt` on Streamlit Cloud) is required for PDF rendering.
-Set `VISION_MODEL` to a model that accepts `image_url` content on your provider (for example
-`gpt-4o-mini` on OpenAI or `grok-2-vision` on xAI). Vision calls are billed against the session
-budget like any other provider request.
+Invalid or non-positive numeric values fall back to these defaults. PDF rendering needs Poppler:
+set `POPPLER_PATH` locally, while Streamlit Cloud installs `poppler-utils` from `packages.txt`.
+Choose a model that accepts `image_url` content on your provider; `.env.example` lists the same
+variables. Vision calls are billed like other provider requests.
 
----
+## Error handling and fallbacks
+
+`describe_document_images()` never raises. Each failure is recorded in `fallback_reason`:
+
+- **Cannot prepare the document** (for example, Poppler is missing or the PDF cannot be read): no
+  descriptions, and the text-only workflow continues.
+- **Page or image cannot be rendered, validated, or encoded:** processing stops at that point, and
+  descriptions produced earlier are kept.
+- **Vision model not configured:** the provider returns a simulated status. Processing stops and the
+  reason says pictures were not interpreted.
+- **Provider error or timeout:** processing stops, and the reason names the error type. Earlier
+  descriptions are kept.
+- **Prompt template cannot be loaded:** processing stops with the exception type as the reason.
+- **Unsupported standalone format, animated image, or image over the pixel limit:** the image is
+  rejected before any provider request.
+
+Pages where the model finds nothing meaningful are counted as skipped, not as failures. In the app,
+an incomplete interpretation shows a warning with the reason, and a truncated PDF shows a warning
+with the number of pages that were interpreted.
 
 ## Privacy and safety
 
-- Images are re-encoded as JPEG before transmission, which removes EXIF and other metadata.
-- Pixel-count, page-count, and edge-length limits bound memory and provider cost.
-- Animated and unsupported formats are rejected before any provider request.
-- Raw image bytes and base64 payloads are never written to history, feedback, or LangSmith inputs
-  (only `image_count` is traced).
-- The temporary upload is deleted by `temporary_upload()` after extraction and interpretation.
-- Picture descriptions are model output and are always marked `AI_GENERATED`; the answer prompt
-  forbids presenting them as document text.
-- Enabling the feature sends document page images to the configured LLM provider. Update the
-  Privacy Policy and Third-Party Services disclosures before enabling it for external users.
-
----
+- Images are re-encoded as JPEG before transmission, which drops EXIF and other metadata.
+- Pixel, page-count, and edge-length limits bound memory use and provider cost.
+- Model replies are treated as untrusted content. Forged markers are neutralized, and the system
+  message tells the answering model that document content, picture descriptions, and images are data,
+  not instructions.
+- Raw image bytes and base64 payloads are not sent to LangSmith. The trace records only the number of
+  images (`image_count`).
+- The temporary upload is removed after extraction and interpretation.
+- Enabling the feature sends page images to the configured LLM provider. Update the
+  [privacy policy](../Policies/PRIVACY_POLICY.md) and
+  [third-party services](../Policies/THIRD_PARTY_SERVICES.md) disclosures before enabling it for
+  external users.
 
 ## Tests
 
-```powershell
-python test_visual_ingest.py   # mocked provider; creates and removes small temp images
-python test_ingest.py          # includes page-aware attachment test
-python test_ai_query.py        # includes answer disclosure test
-```
+Run these from the repository root:
 
-`test_visual_ingest.py` covers payload shape and model selection, one call per page, sentinel
-skipping, provider error / simulated / render-failure fallbacks, image validation limits,
-downscaling, and a standalone image flowing through to a disclosed answer.
-
----
+- `python -m test_src.test_visual_ingest` covers the vision request payload and model selection, one
+  call per page, skipping of picture-less pages, provider, configuration, and render fallbacks,
+  image validation limits, downscaling, one-page-at-a-time processing, and a standalone image flowing
+  through to a disclosed answer. It uses a mocked provider and writes small temporary images to the
+  working directory, then removes them.
+- `python -m test_src.test_ingest` includes tests that attach descriptions to their PDF page and that
+  forged markers in uploaded text or DOCX content are neutralized.
+- `python -m test_src.test_ai_query` includes a test that answers disclose the selected
+  AI-generated description.
 
 ## Limitations
 
-- One description per PDF page; individual pictures are not cropped or given bounding boxes.
-- No source-image preview in the UI; the original page image is not retained after upload.
-- Standalone images without OCR-readable text rely entirely on the vision description.
-- Quality depends on the configured vision model and the render DPI.
+- One description per PDF page. Individual pictures on a page are not separated.
+- Only the first `MEDIA_MAX_PAGES` pages of a PDF are interpreted.
+- The original page image is not kept after upload, so the UI cannot show a source preview.
+- Standalone images with no OCR-readable text depend entirely on the model's description.
+- Description quality depends on the configured vision model and the render resolution.
+- Vision calls are not tested against a live provider in the automated suite.
+
+## Related
+
+- [STEP_1_INGEST.md](STEP_1_INGEST.md): text extraction, OCR fallback, and image routing.
+- [STEP_2_PREPROCESS.md](STEP_2_PREPROCESS.md): page-aware chunking that keeps description blocks with their page.
+- [STEP_3_EMBEDDING_INDEXING.md](STEP_3_EMBEDDING_INDEXING.md): indexing of the enriched document text.
+- [STEP_4_AI_QUERY.md](STEP_4_AI_QUERY.md): the chat-completions client that gains image content parts.
+- [STEP_5_PIPELINE.md](STEP_5_PIPELINE.md): retrieval, the answer result contract, and the disclosure notice.
+- [STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md](STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md): `packages.txt` and Poppler on Streamlit Cloud.
+- [STEP_10_COST_TRACKING.md](STEP_10_COST_TRACKING.md): how vision tokens count against the session budget.
+- [STEP_11_GDPR_COMPLIANCE.md](STEP_11_GDPR_COMPLIANCE.md): privacy disclosures that cover sending page images to a provider.
+- [STEP_13_MULTIMODAL_IMPLEMENTATION_PLAN.md](STEP_13_MULTIMODAL_IMPLEMENTATION_PLAN.md): planned future work.
+- [FUTURE_ADD_INS.md](FUTURE_ADD_INS.md): other planned extensions.

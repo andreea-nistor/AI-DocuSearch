@@ -1,426 +1,104 @@
-# DocuSearch — Step 1: Document Ingestion & Text Extraction
-
-## Overview
-The ingestion step is responsible for extracting raw text from various document formats (PDF, DOCX, plain text, and optionally standalone images). This is the first step in the document processing pipeline that reads document files and converts them into plain text.
-
-## Purpose
-- Extract text content from multiple document formats
-- Handle different file types automatically based on file extension
-- Provide error handling and fallback mechanisms
-- Enable seamless integration with downstream processing steps
-
-## Supported File Formats
-- **PDF** (.pdf) - Using `pypdf` library, with OCR fallback for scanned pages
-- **Word Documents** (.docx) - Using `python-docx` library. Legacy `.doc` is rejected with a clear error.
-- **Plain Text** (.txt, .md, etc.) - Using Python's built-in file reader
-- **Images** (.png, .jpg, .jpeg, .webp) - OCR text via `extract_text_from_image()`, or `""` if OCR is
-  unavailable; only meaningful once `MULTIMODAL_ENABLED=true` also generates a picture description
-  (see `STEP_12_PICTURE_INTERPRETATION.md`)
-
----
-
-## Detailed Implementation Steps
-
-### Step 1.1: PDF Text Extraction
-```python
-def extract_text_from_pdf(path: str) -> str:
-```
-
-**Process:**
-1. Import the `PdfReader` class from `pypdf`
-2. Initialize a `PdfReader` object with the file path
-3. Iterate through all pages in the PDF
-4. Extract text from each page using `.extract_text()`
-5. Preserve every physical page, including empty pages, with a `[PDF_PAGE:n]` marker
-6. Join marked page texts with blank-line separators while retaining the string return type
-
-**Error Handling:**
-- If `pypdf` is not installed, raises `RuntimeError` with installation instructions
-- Corrupted, encrypted, or unreadable PDFs raise `PdfExtractionError` with a user-facing message
-
-**Example:**
-```python
-# Extract text from a PDF file
-text = extract_text_from_pdf("documents/contract.pdf")
-print(text)  # Output: Full text content of the PDF
-```
-
----
-
-### Step 1.2: DOCX Text Extraction
-```python
-def extract_text_from_docx(path: str) -> str:
-```
-
-**Process:**
-1. Import the `Document` class from `docx` (python-docx)
-2. Load the DOCX file as a Document object
-3. Iterate through all paragraphs in the document
-4. Extract text from each paragraph
-5. Join all paragraphs with newline separators
-
-**Error Handling:**
-- If `python-docx` is not installed, raises `RuntimeError` with installation instructions
-- Empty paragraphs are skipped automatically
-
-**Example:**
-```python
-# Extract text from a Word document
-text = extract_text_from_docx("documents/report.docx")
-print(text)  # Output: Full text content of the DOCX
-```
-
-Note: `extract_text_from_docx` also extracts table contents, joining each row's non-empty cells
-with ` | ` and appending them as additional lines after the paragraph text.
-
----
-
-### Step 1.2b: PDF OCR Fallback (Scanned PDFs)
-```python
-def extract_text_from_pdf_ocr(path: str, poppler_path: str | None = None) -> str:
-```
-
-**Purpose:** Some PDFs contain scanned images with no extractable text layer. This fallback
-renders each page to an image and runs OCR to recover the text.
-
-**Process:**
-1. Convert PDF pages to images using `pdf2image.convert_from_path` (300 DPI)
-2. Run `pytesseract.image_to_string` on each page image
-3. Add the same `[PDF_PAGE:n]` marker used by searchable extraction, even when OCR fails for a page
-4. Join marked page texts with blank-line separators
-
-**Configuration (optional environment variables):**
-- `TESSERACT_CMD` — path to the Tesseract executable, if not on `PATH`
-- `POPPLER_PATH` — path to the Poppler `bin` directory, if not on `PATH` (used by `pdf2image`)
-
-**Error Handling:**
-- Raises `RuntimeError` with install instructions if `pdf2image` or `pytesseract` is missing
-- Per-page OCR failures are swallowed and treated as empty text for that page (not a hard failure)
-
-**Additional dependencies (already pinned in `requirements.txt`):**
-- `pdf2image`, `pillow`, `pytesseract` (Python packages)
-- Poppler and Tesseract OCR system binaries must be installed separately (see `packages.txt` for
-  Streamlit Cloud, or set `POPPLER_PATH`/`TESSERACT_CMD` locally)
-
-**Example:**
-```python
-from src.ingest import extract_text_from_pdf_ocr
-
-text = extract_text_from_pdf_ocr("documents/scanned.pdf", poppler_path=r"C:\poppler\bin")
-```
-
----
-
-### Step 1.3: Unified File Handler
-```python
-def extract_text(path: str) -> str:
-```
-
-**Process:**
-1. Check if file exists using `os.path.exists()`
-2. Extract file extension using `os.path.splitext()`
-3. Convert extension to lowercase for case-insensitive matching
-4. Route to appropriate extraction function based on extension:
-   - `.png`, `.jpg`, `.jpeg`, `.webp` → `extract_text_from_image()` (OCR text, or `""` if
-     `pytesseract`/Tesseract is unavailable)
-     - `.pdf` → `extract_text_from_pdf()`; if that returns only page markers with no text, automatically retries
-     with `extract_text_from_pdf_ocr()` (using `POPPLER_PATH` if set) before giving up
-   - `.docx` → `extract_text_from_docx()`
-   - `.doc` → raises `RuntimeError` (legacy `.doc` is **not** supported; convert to `.docx` or plain text first)
-   - All other formats → `extract_text_from_text_file()` (plain text reader)
-5. Return extracted text as string
-
-**Error Handling:**
-- Raises `FileNotFoundError` if file doesn't exist
-- Raises `RuntimeError` for unsupported `.doc` files
-- If OCR fallback also fails for a PDF, silently returns whatever (possibly empty) text was
-  already extracted rather than raising
-- Uses UTF-8 encoding with error tolerance for text files (`errors="ignore"`)
-
-**Example:**
-```python
-# Universal extraction - automatically detects format
-text = extract_text("documents/sample.pdf")  # Works with PDF (with OCR fallback if scanned)
-text = extract_text("documents/report.docx") # Works with DOCX
-text = extract_text("documents/notes.txt")   # Works with TXT
-```
-
----
-
-## Module Location & File Structure
-**File:** `src/ingest.py`
-
-**Functions:**
-- `extract_text_from_pdf(path: str) -> str`
-- `extract_text_from_pdf_ocr(path: str, poppler_path: str | None = None) -> str`
-- `extract_text_from_docx(path: str) -> str`
-- `extract_text_from_text_file(path: str) -> str`
-- `extract_text_from_image(path: str) -> str` — OCR text for a standalone image, or `""`
-- `get_pdf_page_count(path: str) -> int`
-- `extract_text(path: str) -> str`
-
-**Dependencies:**
-- `pypdf` - PDF text extraction
-- `python-docx` - DOCX text extraction
-- `pdf2image`, `pytesseract`, `pillow` - OCR fallback and standalone image OCR (system Poppler/Tesseract binaries required)
-- `os` - File system operations
-
----
-
-## Testing Methods
-
-### Test 1.1: PDF Extraction Test
-**Objective:** Verify that PDF files are correctly parsed and text is extracted
-
-**Setup:**
-```python
-import os
-from src.ingest import extract_text_from_pdf
-
-# Create a sample PDF or use existing one
-test_file = "examples/sample.pdf"
-```
-
-**Test Case:**
-```python
-def test_pdf_extraction():
-    text = extract_text_from_pdf(test_file)
-    
-    # Assertions:
-    assert isinstance(text, str), "Output should be a string"
-    assert len(text) > 0, "Text should not be empty"
-    assert "\n" in text, "Text should preserve page separations"
-    print("✓ PDF extraction test passed")
-```
-
-**Expected Output:**
-- Non-empty string
-- Text containing document content
-- Multiple lines (page separations preserved)
-
----
-
-### Test 1.2: DOCX Extraction Test
-**Objective:** Verify that Word documents are correctly parsed
-
-**Setup:**
-```python
-from src.ingest import extract_text_from_docx
-
-test_file = "examples/sample.docx"
-```
-
-**Test Case:**
-```python
-def test_docx_extraction():
-    text = extract_text_from_docx(test_file)
-    
-    # Assertions:
-    assert isinstance(text, str), "Output should be a string"
-    assert len(text) > 0, "Text should not be empty"
-    assert "\n" in text, "Paragraphs should be separated"
-    print("✓ DOCX extraction test passed")
-```
-
-**Expected Output:**
-- Non-empty string
-- All paragraph content preserved
-- Newline separators between paragraphs
-
----
-
-### Test 1.3: File Format Detection Test
-**Objective:** Verify that the unified handler correctly routes to format-specific functions
-
-**Setup:**
-```python
-from src.ingest import extract_text
-
-# Prepare test files with different extensions
-pdf_file = "examples/sample.pdf"
-docx_file = "examples/sample.docx"
-txt_file = "examples/sample.txt"
-```
-
-**Test Case:**
-```python
-def test_file_format_detection():
-    # Test PDF detection
-    pdf_text = extract_text(pdf_file)
-    assert isinstance(pdf_text, str) and len(pdf_text) > 0
-    
-    # Test DOCX detection
-    docx_text = extract_text(docx_file)
-    assert isinstance(docx_text, str) and len(docx_text) > 0
-    
-    # Test TXT detection
-    txt_text = extract_text(txt_file)
-    assert isinstance(txt_text, str) and len(txt_text) > 0
-    
-    print("✓ File format detection test passed")
-```
-
-**Expected Output:**
-- All formats extracted successfully
-- Correct routing to format-specific handlers
-
----
-
-### Test 1.4: Error Handling Test
-**Objective:** Verify proper error handling for missing/invalid files
-
-**Test Case:**
-```python
-def test_error_handling():
-    # Test non-existent file
-    try:
-        extract_text("nonexistent.pdf")
-        assert False, "Should raise FileNotFoundError"
-    except FileNotFoundError:
-        print("✓ Correctly raises FileNotFoundError for missing files")
-    
-    # Test unsupported format handling
-    # (should fallback to text reading)
-    text = extract_text("examples/sample.unknown")
-    assert isinstance(text, str)
-    print("✓ Correctly handles unsupported formats")
-```
-
-**Expected Behavior:**
-- Raises `FileNotFoundError` for missing files
-- Falls back to text reader for unknown extensions
-- Handles encoding errors gracefully
-
----
-
-### Test 1.5: Content Integrity Test
-**Objective:** Verify that no content is lost during extraction
-
-**Test Case:**
-```python
-def test_content_integrity():
-    # Extract text from document
-    text = extract_text("examples/sample.pdf")
-    
-    # Check for common document elements
-    checks = [
-        (len(text) > 100, "Text should contain substantial content"),
-        (text == text.strip(), "Text should be properly stripped"),
-        ("\n\n" in text or "\n" in text, "Text should contain line breaks"),
-    ]
-    
-    for condition, message in checks:
-        assert condition, message
-    
-    print("✓ Content integrity test passed")
-```
-
----
-
-## Running Tests from Command Line
-
-### Quick Manual Test
-```bash
-# Test PDF extraction
-python -c "from src.ingest import extract_text; print(extract_text('examples/sample.pdf')[:200])"
-
-# Test DOCX extraction
-python -c "from src.ingest import extract_text; print(extract_text('examples/sample.docx')[:200])"
-```
-
-### Using the Module Directly
-```bash
-# Run the ingest module with file argument
-python src/ingest.py examples/sample.pdf
-
-# This prints the full extracted text (or "No text was extracted from the file.")
-```
-
-### Complete Test Suite Example
-```python
-# test_ingest.py
-from src.ingest import extract_text, extract_text_from_pdf, extract_text_from_docx
-import os
-
-def run_all_tests():
-    print("Running Ingestion Tests...")
-    test_file_format_detection()
-    test_error_handling()
-    test_content_integrity()
-    print("\n✓ All tests passed!")
-
-if __name__ == "__main__":
-    run_all_tests()
-```
-
-Run with:
-```bash
-python test_ingest.py
-```
-
----
-
-## Common Issues & Solutions
-
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| `ModuleNotFoundError: No module named 'pypdf'` | Library not installed | `pip install pypdf` |
-| `ModuleNotFoundError: No module named 'docx'` | Library not installed | `pip install python-docx` |
-| `FileNotFoundError` | File path incorrect or doesn't exist | Verify file path and existence |
-| Empty string returned | File is empty or corrupted | Check file integrity |
-| Encoding errors in text files | Mixed encoding or special characters | Already handled with UTF-8 fallback |
-
----
-
-## OCR on Streamlit Cloud
-
-### System Dependencies
-
-For OCR support on Streamlit Cloud, the `packages.txt` file must include:
+# Step 1: Document Ingestion & Text Extraction
+
+This step turns an uploaded or local document into plain text. Every later step (preprocessing, embeddings, retrieval, and the LLM answer) works on the string this step produces. The code lives in [src/ingest.py](../src/ingest.py).
+
+## Goal
+
+- Accept the common document formats used in DocuSearch: PDF, DOCX, plain text, and standalone images.
+- Return one UTF-8 string per document, with enough structure left in it for later steps to know which page each piece of text came from.
+- Recover text from scanned PDFs and images when no text layer exists, using OCR.
+- Fail with clear messages for files that cannot be read, and degrade quietly where a partial result is still useful.
+
+## Design Decisions
+
+- **Dispatch by extension.** `extract_text()` is the single entry point. It lowercases the file extension and routes to a format-specific reader. Unknown extensions are read as text, so the step never rejects a file just because its extension is unfamiliar.
+- **Page markers.** Every physical PDF page is written as a `[PDF_PAGE:n]` block, including empty pages. Page numbers survive into the chunks, which is what allows page-specific questions to be answered later.
+- **Searchable text first, OCR second.** PDFs are read from their text layer with `pypdf`. OCR (`pdf2image` plus `pytesseract`) runs only when that layer yields no text, because OCR is much slower.
+- **Forged marker neutralization.** Uploaded text can contain strings that look like internal markers (`[PDF_PAGE:n]` or `[PICTURE_DESCRIPTION:...]`). All readers pass their output through `neutralize_forged_markers()` from [src/visual_content.py](../src/visual_content.py), so only the extractor can create real page and AI-description markers.
+- **Optional heavy dependencies.** `pypdf`, `python-docx`, `pdf2image`, and `pytesseract` are imported inside the functions that use them. A missing package produces a `RuntimeError` with install hints instead of breaking module import.
+
+## Supported Formats
+
+| Extension | Reader | Notes |
+|-----------|--------|-------|
+| `.pdf` | `extract_text_from_pdf()`, then OCR if empty | Searchable PDFs use `pypdf`; scanned PDFs fall back to OCR |
+| `.docx` | `extract_text_from_docx()` | Paragraphs and tables are both extracted |
+| `.png`, `.jpg`, `.jpeg`, `.webp` | `extract_text_from_image()` | OCR text, or an empty string when OCR is unavailable |
+| `.doc` | none | Rejected with a `RuntimeError`; convert to `.docx` or plain text first |
+| Anything else | `extract_text_from_text_file()` | Read as UTF-8 text, ignoring undecodable bytes |
+
+Image text is only one part of the picture handling. When `MULTIMODAL_ENABLED=true`, a vision model also describes the image, as covered in [STEP_12_PICTURE_INTERPRETATION.md](STEP_12_PICTURE_INTERPRETATION.md).
+
+## How the Flow Works
+
+1. `extract_text()` checks that the path exists and raises `FileNotFoundError` otherwise.
+2. The extension is lowercased and matched against the supported formats above.
+3. **PDF:** `pypdf` reads each page in order. Each page's text is stripped and wrapped in a `[PDF_PAGE:n]` block, and the blocks are joined with blank lines.
+4. **PDF OCR fallback:** if the result contains no text beyond the page markers, the file is rendered to images at 300 DPI and each page is OCR'd. The `POPPLER_PATH` environment variable is passed to `pdf2image` when set. OCR failures do not raise; the original (possibly empty) text is returned.
+5. **DOCX:** non-empty paragraphs are kept, stripped, and joined with newlines. Each table row is then appended as one line, with its non-empty cells joined by ` | `.
+6. **Images:** the image is opened with Pillow and passed to Tesseract. If OCR fails for any reason, the function returns an empty string so that a vision-only description can still be produced.
+7. **Plain text:** the file is read as UTF-8 with undecodable bytes dropped.
+8. Every reader applies `neutralize_forged_markers()` to the text it returns, including each PDF page before it is wrapped in its marker.
+
+Helper functions also used by the rest of the app are `get_pdf_page_count()`, which returns the page count or `0` on failure, and the `PdfExtractionError` exception class.
+
+## Error Handling and Fallbacks
+
+- **Missing file:** `FileNotFoundError` from `extract_text()`.
+- **Unreadable PDF:** if `pypdf` cannot parse the file (corrupted, password-protected, or unusual internal structure), `extract_text_from_pdf()` raises `PdfExtractionError` with a user-facing message. The OCR fallback is not attempted in this case, because OCR would fail on the same file.
+- **Missing pypdf, python-docx, pdf2image, or pytesseract:** a `RuntimeError` with an install command.
+- **Legacy `.doc`:** a `RuntimeError` asking the user to convert the file.
+- **Per-page OCR failure:** that page becomes empty text, and the remaining pages are still processed.
+- **OCR fallback failure for a PDF:** the empty or partial searchable text is returned without raising.
+- **Image OCR failure:** the function returns `""` rather than raising.
+
+## Configuration
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `TESSERACT_CMD` | No | Full path to the Tesseract executable, when it is not on `PATH`. Read by both PDF OCR and image OCR. |
+| `POPPLER_PATH` | No | Path to the Poppler `bin` directory, when it is not on `PATH`. Used by `pdf2image` for PDF OCR. An explicit `poppler_path` argument takes precedence. |
+
+On Streamlit Cloud, Tesseract and Poppler are installed from [packages.txt](../packages.txt) (`tesseract-ocr`, `poppler-utils`, `libtesseract-dev`), so these variables are not needed there. Python packages are listed in [requirements.txt](../requirements.txt): `pypdf`, `python-docx`, `pdf2image`, `pytesseract`, and `pillow`.
+
+## Tests
+
+The tests are plain Python functions run by a custom script, not a test runner. Run the full set from the repository root:
 
 ```
-tesseract-ocr
-poppler-utils
-libtesseract-dev
+python -m test_src.test_ingest
 ```
 
-These system packages are automatically installed during Streamlit Cloud deployment.
+Coverage in [test_src/test_ingest.py](../test_src/test_ingest.py) includes:
 
-### Language Support
+- Plain text round-trip and `FileNotFoundError` for a missing path.
+- DOCX extraction (skipped with a message if `python-docx` is not installed) and rejection of `.doc`.
+- Corrupted PDFs raising `PdfExtractionError`, and not being swallowed by the OCR fallback.
+- Page numbers preserved for searchable PDFs, including empty pages, and for OCR output where one page fails.
+- The OCR fallback triggering only when the searchable text is empty.
+- Forged `[PDF_PAGE:n]` and `[PICTURE_DESCRIPTION:...]` markers in TXT, DOCX, and PDF text being neutralized.
+- Temporary upload cleanup after success and after failure, and the pipeline still working afterwards.
 
-Tesseract includes English by default. For other languages (e.g., Romanian):
+PDF and OCR tests use mocks (`patch("pypdf.PdfReader")` and fake `pdf2image`/`pytesseract` modules), so they run without sample files or system binaries.
 
-**On local development:**
-- Install language data: `apt-get install tesseract-ocr-ron` (Romanian)
-- Or use environment variable: `TESSERACT_CONFIG` with language code: `export TESSDATA_PREFIX=/path/to/tessdata`
+For a quick manual check of one file, run the module with a path:
 
-**On Streamlit Cloud:**
-- Language packs are installed automatically with `tesseract-ocr` package
-- Romanian OCR works out-of-the-box
+```
+python -m src.ingest examples/sample.txt
+```
 
-### Troubleshooting OCR
+This prints the extracted text, or `No text was extracted from the file.` when the result is empty.
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| "pdf2image not found" | Missing Python package | Ensure `pdf2image` in `requirements.txt` |
-| "poppler-utils not found" | Missing system package | Ensure `poppler-utils` in `packages.txt` |
-| "pytesseract not found" | Missing Python package | Ensure `pytesseract` in `requirements.txt` |
-| OCR very slow (60+ seconds) | Large or high-DPI PDF | Normal for scanned documents; consider splitting them |
-| Poor OCR results | Low quality scan or non-Latin script | Rescan at higher DPI or convert to digital PDF |
+## Limitations
 
----
+- The whole document is read into memory. Very large PDFs take time and memory, and there is no streaming.
+- OCR is slow on large or high-resolution scans, and quality drops on low-quality scans or non-Latin scripts. OCR language selection is not configurable in this step; Tesseract's default language is used.
+- Plain-text decoding assumes UTF-8. Other encodings can lose characters because undecodable bytes are dropped rather than reported.
+- Legacy `.doc` files are not supported.
+- Text extraction does not preserve layout, fonts, or tables in PDFs. Only the text layer, or OCR output, is kept.
 
-## Performance Considerations
+## Related
 
-- **Large PDFs:** Processing very large PDFs (100+ MB) may take time; consider processing in chunks
-- **Memory Usage:** Entire document is loaded into memory; not suitable for streaming scenarios
-- **Encoding:** UTF-8 fallback handles most encodings but may lose some characters
-
----
-
-## Integration with Next Step
-
-The output of this step (plain text) becomes the input for **Step 2: Preprocessing & Text Cleaning**, where the text will be:
-- Cleaned of formatting artifacts
-- Divided into manageable chunks
-- Prepared for embedding generation
+- [STEP_2_PREPROCESS.md](STEP_2_PREPROCESS.md): consumes this step's output, cleans it, and splits it into page-aware chunks.
+- [STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md](STEP_7_STREAMLIT_CLOUD_DEPLOYMENT.md): explains how `packages.txt` provides the OCR system binaries on Streamlit Cloud.
+- [STEP_12_PICTURE_INTERPRETATION.md](STEP_12_PICTURE_INTERPRETATION.md): adds vision-model descriptions for pages and images.

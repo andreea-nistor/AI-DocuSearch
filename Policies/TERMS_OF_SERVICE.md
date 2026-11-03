@@ -7,7 +7,7 @@
 
 AI DocuSearch (the "Service") is a free experimental personal project operated by Andreea Nistor. It is currently provided for testing and evaluation, without production-service, availability, support, or data-recovery guarantees. The operator is an individual, not a company.
 
-Contact: lazar87andreea@gmail.com
+Contact: nistor_andreea_ii@yahoo.com
 
 Do not use the Service for business-critical work or upload confidential, highly sensitive, or irreplaceable information.
 
@@ -85,7 +85,7 @@ Always verify an answer against the original document. The Service does not prov
 
 ## 9. Third-Party Services and International Processing
 
-The Service may rely on a configured LLM provider, LangSmith for debugging and tracing, IP geolocation for attempted language selection, Google Forms for optional testing feedback, and hosting or infrastructure providers. Depending on the execution path, document excerpts or full extracted document text, questions, answers, and technical metadata may be transmitted to the relevant providers. Only information you enter into the external feedback form is intentionally submitted to Google Forms.
+The Service may rely on a configured LLM provider, LangSmith for debugging and tracing, Google Forms for optional testing feedback, and hosting or infrastructure providers. Depending on the execution path, document excerpts or full extracted document text, questions, answers, and technical metadata may be transmitted to the relevant providers. Only information you enter into the external feedback form is intentionally submitted to Google Forms.
 
 Third-party services operate under their own terms, privacy policies, security measures, locations, and retention practices. The project operator cannot guarantee their availability or independently erase data they retain unless their tools and policies allow it. Processing may occur outside your country of residence.
 
@@ -148,7 +148,7 @@ The Service is free and experimental. Nothing in these Terms limits liability th
 
 Applicable mandatory consumer, privacy, and data-protection rights remain in effect regardless of these Terms. No specific governing jurisdiction or mandatory arbitration process is asserted by this experimental project.
 
-Before starting a formal dispute, please contact the operator at lazar87andreea@gmail.com and provide a reasonable opportunity to address the concern. This does not restrict your right to contact a court, consumer-protection body, or data-protection authority where applicable.
+Before starting a formal dispute, please contact the operator at nistor_andreea_ii@yahoo.com and provide a reasonable opportunity to address the concern. This does not restrict your right to contact a court, consumer-protection body, or data-protection authority where applicable.
 
 ## 17. Changes to These Terms
 
@@ -162,7 +162,7 @@ If a provision of these Terms is found unenforceable, the remaining provisions w
 
 **Operator:** Andreea Nistor
 
-**Email:** lazar87andreea@gmail.com
+**Email:** nistor_andreea_ii@yahoo.com
 
 **GitHub:** https://github.com/andreea-nistor/AI-DocuSearch
 

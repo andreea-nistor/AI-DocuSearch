@@ -14,6 +14,7 @@ import streamlit as st
 from datetime import datetime
 from pathlib import Path
 from src.cost_tracker import export_cost_data
+from src.i18n import translate
 
 
 def get_consent_key() -> str:
@@ -30,42 +31,32 @@ def show_consent_banner() -> bool:
         st.session_state[get_consent_key()] = False
     
     if not st.session_state[get_consent_key()]:
-        st.warning("""
-        🔒 **Privacy & Data Processing Notice**
-        
-        By using AI DocuSearch, you consent to:
-        - **Processing your documents** with AI models (text excerpts, and page images when picture interpretation is enabled, are sent to the configured LLM provider)
-        - **Storing chat history** for 30 days and feedback for 90 days (auto-deleted after)
-        - **Analytics & debugging** via LangSmith for performance monitoring
-        - **Language detection** from your IP/browser headers
-        
-        ✅ **Your rights:**
-        - 📥 Download your data anytime
-        - 🗑️ Delete your data anytime
-        - ⏰ Auto-deletion after 30 days (history) / 90 days (feedback)
-        
-        """)
+        st.warning(
+            f"{translate('consent_title')}\n\n"
+            f"{translate('consent_body')}\n\n"
+            f"{translate('consent_rights')}"
+        )
 
         legal_links = st.container(horizontal=True)
         with legal_links:
             st.page_link(
                 "app_pages/privacy_policy.py",
-                label="Privacy Policy",
+                label=translate("nav_privacy"),
                 icon=":material/policy:",
             )
             st.page_link(
                 "app_pages/terms_of_service.py",
-                label="Terms of Service",
+                label=translate("nav_terms"),
                 icon=":material/description:",
             )
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("✅ I Agree & Continue", use_container_width=True):
+            if st.button(translate("consent_agree"), use_container_width=True):
                 st.session_state[get_consent_key()] = True
                 st.rerun()
         with col2:
-            st.info("⚠️ You must consent to use this service", icon="ℹ️")
+            st.info(translate("consent_required"), icon="ℹ️")
         
         return False
     
@@ -212,74 +203,67 @@ def show_gdpr_footer(session_id: str, history_manager, feedback_manager=None):
     - Third-party services
     """
     st.markdown("---")
-    st.markdown("### 🔒 Privacy & Data Management")
+    st.markdown(translate("privacy_section"))
     
     col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
-        if st.button("📥 Download Data", use_container_width=True, help="Export your data (GDPR right to portability)"):
+        if st.button(translate("download_data"), use_container_width=True, help=translate("download_help")):
             try:
                 user_data = export_user_data(session_id, history_manager, feedback_manager)
                 json_str = json.dumps(user_data, indent=2, ensure_ascii=False)
                 
                 st.download_button(
-                    label="💾 Save JSON",
+                    label=translate("save_json"),
                     data=json_str,
                     file_name=f"docusearch_data_{session_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                     mime="application/json",
                     use_container_width=True,
                     key=f"download_{session_id}"
                 )
-                st.success("✅ Your data is ready!")
+                st.success(translate("data_ready"))
             except Exception as e:
-                st.error(f"❌ Error: {e}")
+                st.error(f"{translate('error_short')}: {e}")
     
     with col2:
         show_delete_key = f"show_delete_confirmation_{session_id}"
         confirm_delete_key = f"confirm_delete_{session_id}"
 
-        if st.button("🗑️ Delete Data", use_container_width=True, help="Delete all your data (GDPR right to erasure)"):
+        if st.button(translate("delete_data"), use_container_width=True, help=translate("delete_help")):
             st.session_state[show_delete_key] = True
 
         if st.session_state.get(show_delete_key, False):
-            st.warning("⚠️ This will permanently delete ALL your data!")
-            if st.checkbox("I understand - delete everything", key=confirm_delete_key):
+            st.warning(translate("delete_warning"))
+            if st.checkbox(translate("delete_confirm"), key=confirm_delete_key):
                 if delete_user_data(session_id, history_manager, feedback_manager):
                     st.session_state[show_delete_key] = False
-                    st.success("✅ All data deleted!")
+                    st.success(translate("all_deleted"))
                     st.rerun()
                 else:
-                    st.error("❌ Error deleting data")
+                    st.error(translate("delete_error"))
     
     with col3:
         st.page_link(
             "app_pages/privacy_policy.py",
-            label="Privacy Policy",
+            label=translate("nav_privacy"),
             icon=":material/policy:",
         )
     
     with col4:
         st.page_link(
             "app_pages/terms_of_service.py",
-            label="Terms of Service",
+            label=translate("nav_terms"),
             icon=":material/description:",
         )
     
     with col5:
         st.page_link(
             "app_pages/third_party_services.py",
-            label="Third-Party Services",
+            label=translate("nav_third_party"),
             icon=":material/handshake:",
         )
     
-    st.markdown("""
-    **Your GDPR Rights:**
-    - ✅ Access your data (📥 Download)
-    - ✅ Delete your data (🗑️ Delete)
-    - ✅ Data portability (JSON format)
-    - ✅ Restrict processing
-    - ✅ Object to tracking
-    """)
+    st.markdown(translate("gdpr_rights"))
 
 __all__ = [
     "show_consent_banner",

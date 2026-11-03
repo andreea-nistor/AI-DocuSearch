@@ -1,10 +1,39 @@
 """Streamlit navigation tests for the legal document pages."""
 
+from pathlib import Path
+
 from streamlit.testing.v1 import AppTest
+
+WEB_APP = Path(__file__).resolve().parent.parent / "web_app.py"
+
+
+def test_language_gate_english_and_romanian() -> None:
+    """The start screen offers English and Romanian before the consent notice."""
+    app = AppTest.from_file(WEB_APP, default_timeout=30)
+    app.run()
+    assert not app.exception
+
+    button_labels = [button.label for button in app.button]
+    assert "English" in button_labels
+    assert "Română" in button_labels
+
+    next(b for b in app.button if b.label == "Română").click().run()
+    assert not app.exception
+    assert app.session_state["user_language"] == "ro"
+    assert app.session_state["user_language_chosen"]
+
+    app = AppTest.from_file(WEB_APP, default_timeout=30)
+    app.run()
+    next(b for b in app.button if b.label == "English").click().run()
+    assert not app.exception
+    assert app.session_state["user_language"] == "en"
+    assert app.session_state["user_language_chosen"]
 
 
 def test_legal_page_navigation() -> None:
-    app = AppTest.from_file("web_app.py", default_timeout=30)
+    app = AppTest.from_file(WEB_APP, default_timeout=30)
+    app.session_state["user_language"] = "en"
+    app.session_state["user_language_chosen"] = True
     app.session_state["gdpr_consent_given"] = True
     app.run()
 
@@ -38,5 +67,7 @@ def test_legal_page_navigation() -> None:
 
 
 if __name__ == "__main__":
+    test_language_gate_english_and_romanian()
+    print("Language gate test passed.")
     test_legal_page_navigation()
     print("Legal page navigation test passed.")

@@ -9,7 +9,7 @@ This project is designed to be simple, explainable, and Git-friendly while remai
 AI DocuSearch supports:
 - **PDF, DOCX, and TXT ingestion** — with automatic OCR fallback for scanned PDFs
 - **Multi-language support** — OCR works with Romanian, English, and other languages (via Tesseract)
-- **Multilingual UI** — Attempts automatic language detection from browser/IP signals and defaults to English when unavailable
+- **Bilingual UI** — Choose English or Română on the start screen, before the consent notice
 - **Document metadata** — Automatic page count detection for PDFs (users can ask "How many pages?")
 - **PDF page requests** — Physical PDF page identity is preserved, so users can ask for a page or
       a range such as "read pages 12-14"
@@ -68,37 +68,36 @@ AI DocuSearch/
 ├── .gitignore
 ├── requirements.txt
 ├── packages.txt                    # System dependencies for Streamlit Cloud
-├── demo.py
 ├── web_app.py                       # Streamlit navigation entry point
-├── history_cli.py                   # CLI for browsing/exporting local history
-├── export_feedback.py               # Feedback analytics & export tool
-├── langsmith_feedback_report.py     # Reusable feedback export and summary CLI
-├── PRIVACY_POLICY.md                # GDPR/CCPA-oriented privacy documentation
-├── TERMS_OF_SERVICE.md              # User agreement & AI disclaimers
-├── THIRD_PARTY_SERVICES.md          # External-provider disclosure
+├── Policies/                        # Privacy, terms, and third-party disclosures (EN + RO)
 ├── app_pages/
 │   ├── home.py                      # Main document Q&A experience
 │   ├── privacy_policy.py            # In-app Privacy Policy page
 │   ├── terms_of_service.py          # In-app Terms of Service page
 │   └── third_party_services.py      # In-app provider disclosure page
-├── test_ingest.py
-├── test_ai_query.py                 # Provider response-state & page-request tests
-├── test_visual_ingest.py            # Picture-interpretation tests (mocked vision provider)
-├── test_feedback.py                 # Feedback collection tests
-├── test_history.py                  # History tracking tests
-├── test_legal_pages.py              # Legal page navigation verification
-├── test_langsmith.py                # LangSmith configuration verification
-├── test_langsmith_feedback_report.py # Feedback-report CLI tests
+├── test_src/
+│   ├── test_ingest.py               # Document ingestion tests
+│   ├── test_ai_query.py             # Provider response-state & page-request tests
+│   ├── test_visual_ingest.py        # Picture-interpretation tests (mocked vision provider)
+│   ├── test_feedback.py             # Feedback collection tests
+│   ├── test_history.py              # History tracking tests
+│   ├── test_legal_pages.py          # Legal page navigation verification
+│   ├── test_langsmith.py            # LangSmith configuration verification
+│   └── test_langsmith_feedback_report.py # Feedback-report CLI tests
 ├── src/
 │   ├── ai_query.py
 │   ├── cost_tracker.py              # Cost tracking & budget management
 │   ├── embed_index.py
+│   ├── export_feedback.py           # Feedback analytics & export tool
 │   ├── feedback_manager.py          # User feedback collection
 │   ├── gdpr_compliance.py           # Consent, data export/deletion, legal footer
-│   ├── history_manager.py
-│   ├── i18n.py                      # Internationalization (multilingual support)
+│   ├── history_cli.py               # CLI for browsing/exporting local history
+│   ├── history_manager.py           # Question history tracking (per-user, per-session)
+│   ├── i18n.py                      # Translations and language-aware prompts
 │   ├── ingest.py
+│   ├── json_io.py                   # Atomic JSON writes for local data files
 │   ├── langsmith_feedback.py        # Helpful/Not helpful → LangSmith run feedback
+│   ├── langsmith_feedback_report.py # Reusable feedback export and summary CLI
 │   ├── pipeline.py
 │   ├── preprocess.py
 │   ├── prompt_loader.py
@@ -124,9 +123,8 @@ AI DocuSearch/
 │   ├── STEP_10_COST_TRACKING.md
 │   ├── STEP_11_GDPR_COMPLIANCE.md
 │   ├── STEP_12_PICTURE_INTERPRETATION.md
-│   ├── MULTIMODAL_IMPLEMENTATION_PLAN.md
-│   ├── FUTURE_ADD_INS.md
-│   └── IMPLEMENTATION_IMPROVEMENTS.md
+│   ├── STEP_13_MULTIMODAL_IMPLEMENTATION_PLAN.md
+│   └── FUTURE_ADD_INS.md
 ├── examples/
 └── ...
 ```
@@ -216,7 +214,7 @@ but is not currently wired into the live chat view.
 ## Example usage
 
 ```bash
-python demo.py examples/sample.pdf "What are the contract dates?"
+python -m src.pipeline examples/sample.pdf "What are the contract dates?"
 ```
 
 ## Important design note
@@ -263,7 +261,7 @@ the Helpful and Not helpful buttons attach a `user_rating` score of `1` or `0` t
 retaining the local JSON copy. Tracing is entirely optional: if `langsmith` isn't installed or
 tracing isn't enabled, the app behaves exactly the same with no extra network calls.
 
-**Verify LangSmith is working:** Run `python test_langsmith.py` to confirm the connection to your LangSmith project.
+**Verify LangSmith is working:** Run `python -m test_src.test_langsmith` to confirm the connection to your LangSmith project.
 
 **Review user feedback:** Sign in to [LangSmith](https://smith.langchain.com), open **Tracing
 Projects**, select the project named by `LANGSMITH_PROJECT` (default: `ai-docusearch`), and open
@@ -276,9 +274,9 @@ to keep ratings local only.
 defaults to exporting `user_rating = 0` runs as JSON:
 
 ```powershell
-python langsmith_feedback_report.py --project ai-docusearch
-python langsmith_feedback_report.py --project ai-docusearch --format csv
-python langsmith_feedback_report.py --project another-project --score any --since 2026-08-01
+python -m src.langsmith_feedback_report --project ai-docusearch
+python -m src.langsmith_feedback_report --project ai-docusearch --format csv
+python -m src.langsmith_feedback_report --project another-project --score any --since 2026-08-01
 ```
 
 The report includes feedback, errors, latency, token usage, cost, run names, and model counts.
@@ -347,8 +345,8 @@ The documentation set in the `Docs/` folder covers:
 - full pipeline orchestration
 - history tracking, Streamlit Cloud deployment, feedback collection, internationalization,
   cost tracking, and GDPR compliance (Steps 6–11)
-- the multimodal roadmap and implementation plan (`FUTURE_ADD_INS.md`,
-  `MULTIMODAL_IMPLEMENTATION_PLAN.md`)
+- the multimodal implementation plan (`STEP_13_MULTIMODAL_IMPLEMENTATION_PLAN.md`) and
+  open ideas (`FUTURE_ADD_INS.md`)
 
 ## Git-ready status
 
